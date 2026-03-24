@@ -11,7 +11,9 @@
 
 ### Instance Type
 - Use **PyTorch template** (not bare CUDA) — comes with PyTorch + CUDA + cuDNN pre-installed
-- RTX 3090 (24GB) recommended at ~$0.30/hr
+- RTX 3090 (24GB) recommended at ~$0.30/hr, RTX 4090 (24GB) ~$0.50/hr
+- **CRITICAL: Must be CUDA 12.x — do NOT use CUDA 13.x (RTX 5090)** — Ollama 0.18.2 does not support it
+- **Set disk to 50GB+** — default 16GB root disk fills up immediately (Ollama install + model files)
 - **Expose port 11434** when creating the instance (for Ollama)
 
 ### Get the code
@@ -184,37 +186,73 @@ rm /dev/shm/qwen-framl-f16.gguf
 
 ---
 
-## 4. Ollama Setup (Next Steps)
+## 4. Ollama Setup — Issues & Fixes
 
-### Install Ollama
+### Problem: RTX 5090 + CUDA 13 not supported
+This session used an RTX 5090 (CUDA 13.0). Ollama 0.18.2 failed GPU discovery and fell back to CPU inference (~3+ min per response).
+
+**Root cause:** Ollama's runner uses `/tmp` for a temp binary during CUDA init. `/tmp` was full (on root disk), so CUDA init failed silently.
+
+**Fix attempted:** `TMPDIR=/dev/shm` and `OLLAMA_LLM_LIBRARY=cuda_v13` — still fell back to CPU. RTX 5090 is too new for Ollama 0.18.2.
+
+**Solution for next session: Use RTX 3090 or RTX 4090 (CUDA 12.x)**. Check CUDA version shown on the instance — must be **12.x not 13.x**.
+
+---
+
+### Problem: Ollama install.sh failed — root disk full
+```
+tar: lib/ollama/vulkan: Cannot mkdir: No space left on device
+```
+Install script extracts to `/usr/local/` which is on the 16GB root overlay (full).
+
+**Fix:** Download tarball and extract to `/dev/shm`, run binary from there:
 ```bash
-curl -fsSL https://ollama.com/install.sh | sh
+curl -L "https://github.com/ollama/ollama/releases/download/v0.18.2/ollama-linux-amd64.tar.zst" -o /dev/shm/ollama.tar.zst
+tar --use-compress-program=unzstd -xf /dev/shm/ollama.tar.zst -C /dev/shm
+```
+Binary lands at `/dev/shm/bin/ollama`.
+
+**Problem:** `/dev/shm` is mounted `noexec` — binaries can't run from there.
+
+**Fix:** Copy to `/dev` (not noexec):
+```bash
+cp /dev/shm/bin/ollama /dev/ollama
+chmod +x /dev/ollama
 ```
 
-### Write Modelfile
+### Required env vars to run Ollama with no root disk space
+All of these must be set — Ollama tries to write to root disk by default:
 ```bash
-cat > /tmp/Modelfile.framl << 'EOF'
-FROM /dev/shm/qwen-framl-q4km.gguf
+LD_LIBRARY_PATH=/dev/shm/lib/ollama/cuda_v13:/dev/shm/lib/ollama
+OLLAMA_HOST=0.0.0.0:11434
+OLLAMA_MODELS=/dev/shm/ollama_models
+HOME=/dev/shm                    # prevents ~/.ollama key generation on root disk
+TMPDIR=/dev/shm                  # prevents /tmp usage during CUDA init
+OLLAMA_LLM_LIBRARY=cuda_v13      # force CUDA 13 library
+```
 
-PARAMETER num_ctx 4096
-PARAMETER temperature 0.1
-PARAMETER top_p 0.9
-PARAMETER stop "<|im_end|>"
+### Start server (one line for vast.ai terminal)
+```bash
+LD_LIBRARY_PATH=/dev/shm/lib/ollama/cuda_v13:/dev/shm/lib/ollama OLLAMA_HOST=0.0.0.0:11434 OLLAMA_MODELS=/dev/shm/ollama_models HOME=/dev/shm TMPDIR=/dev/shm OLLAMA_LLM_LIBRARY=cuda_v13 nohup /dev/ollama serve > /dev/shm/ollama.log 2>&1 &
+```
 
-SYSTEM "You are a FRAML (Fraud + AML) analytics AI assistant. You analyze false positive/false negative trade-offs in AML alert thresholds, perform customer behavioral segmentation, and interpret clustering results. Use the available tools to retrieve data, then provide clear, analytical insights. Be concise and reference specific numbers when interpreting results."
-EOF
+### Write Modelfile (use /dev/shm not /tmp)
+```bash
+printf 'FROM /dev/shm/qwen-framl-q4km.gguf\nPARAMETER num_ctx 4096\nPARAMETER temperature 0.1\nPARAMETER top_p 0.9\nPARAMETER stop "<|im_end|>"\nSYSTEM "You are a FRAML (Fraud + AML) analytics AI assistant. Use the available tools to retrieve data, then provide clear, analytical insights."\n' > /dev/shm/Modelfile.framl
 ```
 
 ### Register model
 ```bash
-ollama create qwen-framl -f /tmp/Modelfile.framl
+LD_LIBRARY_PATH=/dev/shm/lib/ollama OLLAMA_HOST=0.0.0.0:11434 OLLAMA_MODELS=/dev/shm/ollama_models HOME=/dev/shm /dev/ollama create qwen-framl -f /dev/shm/Modelfile.framl
 ```
 
-### Start server
+### Verify GPU is being used
 ```bash
-OLLAMA_HOST=0.0.0.0:11434 nohup ollama serve > /tmp/ollama.log 2>&1 &
-ollama list
+grep "inference compute" /dev/shm/ollama.log
 ```
+Must show `library=cuda` not `library=cpu`. If CPU, CUDA init failed — check TMPDIR and disk space.
+
+### Start server (on CUDA 12 instance with enough disk)
 
 ---
 
@@ -244,11 +282,17 @@ Find `<vast-ip>` and `<mapped-port>` in the vast.ai instance dashboard under **O
 
 | Issue | Root Cause | Fix |
 |-------|-----------|-----|
-| Unsloth GGUF export fails silently | `capture_output=True` hides converter error | Run converter manually |
-| Cannot quantize q8_0 → q4_k_m | llama-quantize restriction | Must go via f16 intermediate |
+| Unsloth GGUF export fails silently | `capture_output=True` hides converter error | Run converter manually in terminal |
+| Cannot quantize q8_0 → q4_k_m | llama-quantize restriction | Must go HF → f16 GGUF → q4_k_m |
 | `/dev/shm` space tight | HF cache still present after model loaded | `rm -rf /dev/shm/hf_cache` after Cell 4 |
-| `/` root disk full | 16GB overlay, 95% used | Only use `/dev/shm` for all outputs |
+| `/` root disk full | 16GB overlay, 95% used | Use 50GB+ disk on next instance |
 | Unsloth import warning | trl imported before unsloth | Move unsloth import to top of Cell 2 |
+| Ollama install fails | Root disk full, tar can't extract | Download tarball to /dev/shm, copy binary to /dev/ |
+| `/dev/shm` is noexec | Linux mount flag | Copy binary to `/dev/` which allows execution |
+| Ollama writes to `~/.ollama` | Default HOME is /root on root disk | Set `HOME=/dev/shm` |
+| Ollama uses `/tmp` for CUDA init | Default TMPDIR on root disk | Set `TMPDIR=/dev/shm` |
+| Ollama falls back to CPU | RTX 5090 + CUDA 13 not supported | Use RTX 3090/4090 with CUDA 12.x |
+| VRAM not released after kernel restart | PyTorch holds GPU memory until process exits | `kill -9 <ipykernel PID>` from terminal |
 
 ---
 
