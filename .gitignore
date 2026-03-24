@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Large data files (too big for GitHub — generate locally via ss_data_prep.py)
+docs/ss_segmentation_data.csv
+ss_files/
+
+# ChromaDB (rebuilt locally via ingest.py)
+chroma_db/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Fine-tune outputs (generated on vast.ai)
+finetune/outputs/
+
+# Misc
+Segment_Business_avg_num_trxns.csv
