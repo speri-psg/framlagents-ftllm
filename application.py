@@ -10,6 +10,7 @@ Override the LLM endpoint if needed:
 """
 
 import json
+import re
 import time
 import sys
 import os
@@ -25,7 +26,7 @@ import dash_bootstrap_components as dbc
 from dash import Dash, callback, html, dcc, Input, Output, State, callback_context, ALL, no_update
 from dash_chat import ChatComponent
 
-from config import ALERTS_CSV, SS_CSV, OLLAMA_MODEL, OLLAMA_BASE_URL
+from config import ALERTS_CSV, SS_CSV, SAR_CSV, OLLAMA_MODEL, OLLAMA_BASE_URL
 from agents import OrchestratorAgent
 import lambda_ss_performance
 
@@ -48,7 +49,10 @@ DF           = _df_raw
 DF_BUSINESS  = DF[DF["smart_segment_id"] == 0]
 DF_INDIVIDUAL= DF[DF["smart_segment_id"] == 1]
 
-DF_SS = pd.read_csv(SS_CSV) if os.path.exists(SS_CSV) else None
+DF_SS  = pd.read_csv(SS_CSV) if os.path.exists(SS_CSV) else None
+DF_SAR = pd.read_csv(SAR_CSV) if os.path.exists(SAR_CSV) else None
+DF_SAR_BUSINESS    = DF_SAR[DF_SAR["smart_segment_id"] == 0] if DF_SAR is not None else None
+DF_SAR_INDIVIDUAL  = DF_SAR[DF_SAR["smart_segment_id"] == 1] if DF_SAR is not None else None
 
 _total      = len(DF)
 _biz_count  = len(DF_BUSINESS)
@@ -57,10 +61,19 @@ _alert_count= int(DF["alerts"].sum())
 _fp_count   = int(DF["false_positives"].sum())
 print(f"Alerts data: {_total:,} rows | Business={_biz_count:,} Individual={_ind_count:,}")
 print(f"SS data: {'loaded (' + str(len(DF_SS)) + ' rows)' if DF_SS is not None else 'not found — run python ss_data_prep.py'}")
+_sar_status = (f"loaded ({len(DF_SAR)} rows, {int(DF_SAR['is_sar'].sum())} SARs)" if DF_SAR is not None else "not found - run python simulate_sars.py")
+print(f"SAR simulation: {_sar_status}")
 
 COL_MAP = {
     "AVG_TRXNS_WEEK":   "avg_num_trxns",
     "AVG_TRXN_AMT":     "avg_trxn_amt",
+    "TRXN_AMT_MONTHLY": "trxn_amt_monthly",
+}
+
+# SAR simulation uses ss_segmentation_data column names (slightly different from main DF)
+SAR_COL_MAP = {
+    "AVG_TRXNS_WEEK":   "avg_num_trxns",
+    "AVG_TRXN_AMT":     "avg_weekly_trxn_amt",
     "TRXN_AMT_MONTHLY": "trxn_amt_monthly",
 }
 
@@ -115,6 +128,7 @@ def compute_threshold_stats(df_seg, threshold):
 
     # ── Derive key facts ──────────────────────────────────────────────────────
     max_fp = sweep[0][1]
+    t_last = sweep[-1][0]   # actual last threshold in sweep (may be t_max + step)
     max_fn = sweep[-1][2]
 
     fn_first_nonzero = next(((t, fn) for t, fp, fn in sweep if fn > 0), None)
@@ -151,7 +165,7 @@ def compute_threshold_stats(df_seg, threshold):
         )
         lines.append(
             f"False negatives increase as the threshold continues to rise, "
-            f"reaching {max_fn} at the highest threshold ({t_max})."
+            f"reaching {max_fn} at the highest threshold ({t_last})."
         )
     else:
         lines.append(f"False negatives remain zero across the entire threshold range.")
@@ -175,27 +189,117 @@ def compute_threshold_stats(df_seg, threshold):
 
     lines.append("=== END PRE-COMPUTED ANALYSIS ===")
     lines.append("")
-    lines.append(f"Raw sweep (threshold range {t_min}–{t_max}, step={step}):")
-    lines += [f"  t={t}: FP={fp}, FN={fn}" for t, fp, fn in sweep]
+    MAX_SWEEP_ROWS = 10
+    shown = sweep[:MAX_SWEEP_ROWS]
+    lines.append(f"Raw sweep (threshold range {t_min}–{t_max}, step={step}, showing first {len(shown)} of {len(sweep)} points):")
+    lines += [f"  t={t}: FP={fp}, FN={fn}" for t, fp, fn in shown]
+    if len(sweep) > MAX_SWEEP_ROWS:
+        lines.append(f"  ... ({len(sweep) - MAX_SWEEP_ROWS} additional points not shown)")
 
     return "\n".join(lines)
 
 
 def compute_segment_stats(df):
-    lines = []
+    total_alerts = int(df["alerts"].sum())
+    total_accounts = len(df)
+    lines = ["=== PRE-COMPUTED SEGMENT STATS (copy verbatim, do not compute new numbers) ==="]
     for seg_id, name in [(0, "Business"), (1, "Individual")]:
         seg = df[df["smart_segment_id"] == seg_id]
+        n         = len(seg)
+        alerts    = int(seg["alerts"].sum())
+        fp        = int(seg["false_positives"].sum())
+        fn        = int(seg["false_negatives"].sum())
+        fp_rate   = round(100 * fp / alerts, 1) if alerts > 0 else 0
+        acct_pct  = round(100 * n / total_accounts, 1) if total_accounts > 0 else 0
+        alert_pct = round(100 * alerts / total_alerts, 1) if total_alerts > 0 else 0
         lines.append(
-            f"{name}: total={len(seg):,}, alerts={int(seg['alerts'].sum())}, "
-            f"FP={int(seg['false_positives'].sum())}, FN={int(seg['false_negatives'].sum())}"
+            f"{name}: accounts={n:,} ({acct_pct}% of total), "
+            f"alerts={alerts:,} ({alert_pct}% of all alerts), "
+            f"FP={fp:,} (FP rate={fp_rate}% of alerts), FN={fn:,}"
         )
+    lines.append("=== END PRE-COMPUTED SEGMENT STATS ===")
+    lines.append("Copy the above verbatim. Do NOT compute, derive, or invent any other numbers or percentages. Do NOT suggest specific dollar thresholds.")
+    return "\n".join(lines)
+
+
+def compute_sar_backtest(df_sar_seg, sar_col, segment_name):
+    """
+    Sweep thresholds across SAR customers and report how many simulated SARs
+    would be caught vs. missed at each threshold level.
+
+    Returns PRE-COMPUTED text for the model to copy verbatim.
+    """
+    df = df_sar_seg.dropna(subset=[sar_col]).copy()
+    total_sars = int(df["is_sar"].sum())
+    total_alerted = len(df)
+
+    if total_sars == 0:
+        return "No simulated SARs found for this segment and threshold column."
+
+    t_min = df[sar_col].min()
+    t_max = df[sar_col].max()
+    step  = max(1, int((t_max - t_min) / 100))
+
+    sweep = []
+    t = t_min
+    while t <= t_max + step:
+        caught = int(((df[sar_col] >= t) & (df["is_sar"] == 1)).sum())
+        missed = total_sars - caught
+        sweep.append((round(t, 2), caught, missed))
+        t += step
+
+    # ── Key statistics ────────────────────────────────────────────────────────
+    # Threshold where SAR catch rate first drops below 90% / 80% / 50%
+    def threshold_for_rate(target_rate):
+        target = int(total_sars * target_rate)
+        hit = next(((t, c, m) for t, c, m in sweep if c <= target), None)
+        return hit
+
+    t90 = threshold_for_rate(0.90)   # threshold where we drop below 90% catch
+    t80 = threshold_for_rate(0.80)
+    t50 = threshold_for_rate(0.50)
+
+    # Threshold where SARs first start being missed
+    first_miss = next(((t, c, m) for t, c, m in sweep if m > 0), None)
+
+    lines = ["=== PRE-COMPUTED SAR BACKTEST (copy this verbatim, do not alter numbers) ==="]
+    lines.append(f"Segment: {segment_name} | Column: {sar_col}")
+    lines.append(f"Total simulated SARs: {total_sars} out of {total_alerted} alerted customers ({round(100*total_sars/total_alerted,1)}% SAR filing rate).")
+    lines.append("")
+
+    lines.append(f"At the lowest threshold ({sweep[0][0]}): {sweep[0][1]} SARs caught (100.0%), 0 missed.")
+    if first_miss:
+        lines.append(f"SARs first begin to be missed at threshold {first_miss[0]} ({first_miss[2]} missed).")
+
+    if t90:
+        prev = next((s for s in reversed(sweep) if s[0] < t90[0] and s[1] > int(total_sars*0.90)), None)
+        t90_keep = prev[0] if prev else sweep[0][0]
+        lines.append(f"To catch at least 90% of SARs, threshold must stay at or below {t90_keep} ({int(total_sars*0.90)+1} of {total_sars} caught).")
+    if t80:
+        prev = next((s for s in reversed(sweep) if s[0] < t80[0] and s[1] > int(total_sars*0.80)), None)
+        t80_keep = prev[0] if prev else sweep[0][0]
+        lines.append(f"To catch at least 80% of SARs, threshold must stay at or below {t80_keep} ({int(total_sars*0.80)+1} of {total_sars} caught).")
+    if t50:
+        prev = next((s for s in reversed(sweep) if s[0] < t50[0] and s[1] > int(total_sars*0.50)), None)
+        t50_keep = prev[0] if prev else sweep[0][0]
+        lines.append(f"To catch at least 50% of SARs, threshold must stay at or below {t50_keep} ({int(total_sars*0.50)+1} of {total_sars} caught).")
+
+    lines.append(f"At the highest threshold ({sweep[-1][0]}): {sweep[-1][1]} SARs caught, {sweep[-1][2]} missed (100.0% missed).")
+    lines.append("=== END PRE-COMPUTED SAR BACKTEST ===")
+    lines.append("")
+    lines.append(f"Raw sweep (range {t_min}--{t_max}, step={step}):")
+    lines += [f"  t={t}: caught={c}, missed={m} ({round(100*c/total_sars,1)}% catch rate)" for t, c, m in sweep]
+
     return "\n".join(lines)
 
 
 # ── Tool executor ─────────────────────────────────────────────────────────────
+_cluster_cache = {}  # caches last clustering result for DISPLAY_CLUSTERS filtering
+_current_query = ""  # set before each orchestrator.run() so tool_executor can read it
+
 def tool_executor(tool_name, tool_input):
     """Execute a tool called by an agent. Returns (result_text, fig_or_None)."""
-    global DF_SS
+    global DF_SS, _cluster_cache
 
     if tool_name == "threshold_tuning":
         segment = tool_input.get("segment", "Business")
@@ -207,6 +311,15 @@ def tool_executor(tool_name, tool_input):
 
     elif tool_name == "segment_stats":
         return compute_segment_stats(DF), None
+
+    elif tool_name == "sar_backtest":
+        if DF_SAR is None:
+            return "SAR simulation data not found. Run python simulate_sars.py first.", None
+        segment = tool_input.get("segment", "Business")
+        col     = SAR_COL_MAP.get(tool_input.get("threshold_column", "TRXN_AMT_MONTHLY"), "trxn_amt_monthly")
+        df_sar_seg = DF_SAR_BUSINESS if segment == "Business" else DF_SAR_INDIVIDUAL
+        stats = compute_sar_backtest(df_sar_seg, col, segment)
+        return stats, None
 
     elif tool_name == "alerts_distribution":
         fig = lambda_ss_performance.alerts_distribution(DF)
@@ -247,19 +360,63 @@ def tool_executor(tool_name, tool_input):
         if DF_SS is None:
             print("ss_cluster_analysis: DF_SS not loaded — running prepare_data() first ...")
             DF_SS = ss_data_prep.prepare_data()
-        customer_type = tool_input.get("customer_type", "All")
-        n_clusters    = tool_input.get("n_clusters", 4)
-        scatter_fig, stats, df_clustered = lambda_ss_performance.perform_clustering(
-            DF_SS, customer_type, n_clusters
-        )
+        customer_type   = tool_input.get("customer_type", "All")
+        n_clusters      = tool_input.get("n_clusters", 4)
+        filter_clusters = tool_input.get("filter_clusters", None)
+
+        # GAP-1 patch disabled for V2 testing
+        # _n_match = re.search(r'\b([2-8])\s*clusters?\b', _current_query, re.IGNORECASE)
+        # if not _n_match:
+        #     _n_match = re.search(r'\binto\s+([2-8])\b', _current_query, re.IGNORECASE)
+        # if _n_match:
+        #     n_clusters = int(_n_match.group(1))
+
         ss_dims = {
             "BUSINESS":   ["ACCOUNT_TYPE", "ACCOUNT_AGE_CATEGORY"],
             "INDIVIDUAL": ["ACCOUNT_TYPE", "GENDER", "AGE_CATEGORY", "INCOME_BAND"],
         }
-        treemap_fig = lambda_ss_performance.smartseg_tree_dynamic(
-            df_clustered, customer_type, dims=ss_dims
-        )
-        return stats, (scatter_fig, treemap_fig)
+
+        if filter_clusters and _cluster_cache:
+            # Second call: use cached data, skip re-clustering
+            df_clustered = _cluster_cache["df_clustered"]
+            scatter_fig  = _cluster_cache["scatter_fig"]
+            stats        = _cluster_cache["stats"]
+
+            # Filter scatter: keep only traces for requested clusters
+            import plotly.graph_objects as go
+            keep_names = {f"Cluster {c}" for c in filter_clusters}
+            filtered_scatter = go.Figure(
+                data=[t for t in scatter_fig.data if t.name in keep_names],
+                layout=scatter_fig.layout,
+            )
+            filtered_scatter.update_layout(title=filtered_scatter.layout.title.text +
+                                           f" [filtered: clusters {filter_clusters}]")
+
+            # Filter treemap: keep only rows for requested clusters (0-based internally)
+            cluster_vals = sorted(df_clustered["cluster"].unique())
+            keep_0based  = {cluster_vals[c - 1] for c in filter_clusters
+                            if 1 <= c <= len(cluster_vals)}
+            df_filtered  = df_clustered[df_clustered["cluster"].isin(keep_0based)].copy()
+            treemap_fig  = lambda_ss_performance.smartseg_tree_dynamic(
+                df_filtered, f"{customer_type} (clusters {filter_clusters})", dims=ss_dims
+            )
+            return f"Filtered to clusters {filter_clusters}.\n\n{stats}", (filtered_scatter, treemap_fig)
+
+        else:
+            # First call: run full clustering and cache results
+            scatter_fig, stats, df_clustered = lambda_ss_performance.perform_clustering(
+                DF_SS, customer_type, n_clusters
+            )
+            _cluster_cache.update({
+                "df_clustered": df_clustered,
+                "scatter_fig":  scatter_fig,
+                "stats":        stats,
+                "customer_type": customer_type,
+            })
+            treemap_fig = lambda_ss_performance.smartseg_tree_dynamic(
+                df_clustered, customer_type, dims=ss_dims
+            )
+            return stats, (scatter_fig, treemap_fig)
 
     return f"Unknown tool: {tool_name}", None
 
@@ -364,7 +521,7 @@ _sidebar = dbc.Card([
 _chat_panel = html.Div([
     ChatComponent(
         id="chat-component",
-        messages=INITIAL_MESSAGES,
+        messages=[],
         class_name="FRAML AI",
     )
 ], style={
@@ -389,10 +546,21 @@ app.layout = dbc.Container([
 
     # Store for pending prompt from sidebar buttons
     dcc.Store(id="pending-prompt", data=None),
+    # One-shot interval to inject welcome message after page load
+    dcc.Interval(id="welcome-interval", interval=300, max_intervals=1),
 ], fluid=True, style={"height": "100vh", "overflow": "hidden"})
 
 
 # ── Callbacks ─────────────────────────────────────────────────────────────────
+
+@callback(
+    Output("chat-component", "messages", allow_duplicate=True),
+    Input("welcome-interval", "n_intervals"),
+    prevent_initial_call=True,
+)
+def show_welcome(n):
+    return INITIAL_MESSAGES
+
 
 @callback(
     Output("pending-prompt", "data"),
@@ -427,7 +595,7 @@ def handle_chat(new_message, pending_prompt, messages):
     if "pending-prompt" in trigger and pending_prompt:
         query    = pending_prompt["query"]
         user_msg = {"role": "user", "content": query}
-    elif new_message:
+    elif new_message and new_message.get("role") == "user":
         query    = new_message.get("content", "")
         user_msg = new_message
     else:
@@ -439,12 +607,56 @@ def handle_chat(new_message, pending_prompt, messages):
     updated = messages + [user_msg]
 
     try:
+        global _current_query
+        _current_query = query
         agent_text, chart_results = orchestrator.run(query, tool_executor)
     except Exception as e:
         import traceback
         traceback.print_exc()
         bot_response = {"role": "assistant", "content": f"Sorry, something went wrong: {e}"}
         return updated + [bot_response]
+
+    # Parse DISPLAY_CLUSTERS directive and filter charts if present
+    # Only honour the directive if the user actually asked to filter clusters
+    _filter_keywords = re.search(
+        r'\b(show only|only cluster|highest risk|lowest|top \d|filter)\b',
+        _current_query, re.IGNORECASE
+    )
+    _dc_match = re.search(r'DISPLAY_CLUSTERS:\s*([\d,\s]+)', agent_text or "")
+    if _dc_match and chart_results and _cluster_cache and _filter_keywords:
+        filter_nums = [int(x.strip()) for x in _dc_match.group(1).split(',') if x.strip().isdigit()]
+        if filter_nums:
+            import plotly.graph_objects as _go  # noqa: already imported at top via px
+            df_clustered  = _cluster_cache["df_clustered"]
+            scatter_fig   = _cluster_cache["scatter_fig"]
+            customer_type = _cluster_cache.get("customer_type", "All")
+            ss_dims = {
+                "BUSINESS":   ["ACCOUNT_TYPE", "ACCOUNT_AGE_CATEGORY"],
+                "INDIVIDUAL": ["ACCOUNT_TYPE", "GENDER", "AGE_CATEGORY", "INCOME_BAND"],
+            }
+            # Filter scatter traces
+            keep_names = {f"Cluster {c}" for c in filter_nums}
+            filtered_scatter = _go.Figure(
+                data=[t for t in scatter_fig.data if t.name in keep_names],
+                layout=scatter_fig.layout,
+            )
+            # Filter treemap df to requested clusters (0-based internally)
+            cluster_vals = sorted(df_clustered["cluster"].unique())
+            keep_0based  = {cluster_vals[c - 1] for c in filter_nums if 1 <= c <= len(cluster_vals)}
+            df_filtered  = df_clustered[df_clustered["cluster"].isin(keep_0based)].copy()
+            treemap_fig  = lambda_ss_performance.smartseg_tree_dynamic(
+                df_filtered, f"{customer_type} — clusters {filter_nums}", dims=ss_dims
+            )
+            chart_results = [("ss_cluster_analysis",
+                              {"customer_type": customer_type, "filter_clusters": filter_nums},
+                              (filtered_scatter, treemap_fig))]
+    # Strip DISPLAY_CLUSTERS line and PRE-COMPUTED ANALYSIS markers from displayed text
+    agent_text = re.sub(r'\s*DISPLAY_CLUSTERS:[\d,\s]*', '', agent_text or "").strip()
+    agent_text = re.sub(r'===.*?PRE-COMPUTED ANALYSIS.*?===\n?', '', agent_text).strip()
+    agent_text = re.sub(r'===\s*END PRE-COMPUTED ANALYSIS\s*===\n?', '', agent_text).strip()
+    agent_text = re.sub(r'PRE-COMPUTED ANALYSIS[:\s]*\n?', '', agent_text).strip()
+    agent_text = re.sub(r'===.*?PRE-COMPUTED SEGMENT STATS.*?===\n?', '', agent_text).strip()
+    agent_text = re.sub(r'===\s*END PRE-COMPUTED SEGMENT STATS\s*===\n?', '', agent_text).strip()
 
     if chart_results:
         content = [{"type": "text", "text": agent_text}] if agent_text else []
@@ -458,4 +670,4 @@ def handle_chat(new_message, pending_prompt, messages):
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000, use_reloader=False)
+    app.run(debug=False, port=5000, use_reloader=False)

@@ -66,14 +66,14 @@ def segment_threshold_tuning(df, segment, threshold):
     fig.update_layout(bargroupgap = 0.01, title=f"Threshold({threshold}) Tuning for {segment_names[segment]} Segment")
     return fig
 def alerts_distribution(df):
-    segments=[]
-    segment_total_alerts = []
-    segment_fps=[]
-
-    for segment in df['smart_segment_id'].unique():
-        segments.append(segment)
-        segment_total_alerts.append(df[(df['smart_segment_id'] == segment)& (df['alerts'] == 1)].shape[0])
-        segment_fps.append(df[(df['smart_segment_id'] == segment)& (df['false_positives'] == 1)].shape[0])
+    segment_total_alerts = [
+        df[(df['smart_segment_id'] == 0) & (df['alerts'] == 1)].shape[0],
+        df[(df['smart_segment_id'] == 1) & (df['alerts'] == 1)].shape[0],
+    ]
+    segment_fps = [
+        df[(df['smart_segment_id'] == 0) & (df['false_positives'] == 1)].shape[0],
+        df[(df['smart_segment_id'] == 1) & (df['false_positives'] == 1)].shape[0],
+    ]
 
     data = [
         go.Bar(name='Total Alerts', x=['Business', 'Individual'], y=segment_total_alerts),
@@ -96,7 +96,7 @@ def plot_thresholds_tuning(df_segment, threshold, bump_pct, segment):
         fn = df_segment[(df_segment[threshold] < threshold_bump) & (df_segment['false_negatives'] == 1)].shape[0]
         false_positives.append(fp)
         false_negatives.append(fn)
-        thresholds.append(threshold_bump)
+        thresholds.append(round(threshold_bump, 2))
         threshold_bump = threshold_bump + step
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=thresholds, y=false_positives, mode='lines', name='False Positives',
@@ -110,7 +110,7 @@ def plot_thresholds_tuning(df_segment, threshold, bump_pct, segment):
         legend=dict(x=0.01, y=0.99),
     )
     fig.add_annotation(
-        text=f"<b>Threshold Min: {threshold_min}<br><b>Threshold Max: {threshold_max}",
+        text=f"<b>Threshold Min: {round(threshold_min, 2)}<br><b>Threshold Max: {round(threshold_max, 2)}",
         xref="paper", yref="paper",
         x=1, y=0.5,
         showarrow=False, align="right", valign="middle"
@@ -306,7 +306,7 @@ def plot_thresholds_metric(df_segment, threshold, bump_pct, segment, metric):
             else:
                 metric_F1 = 0
             scores.append (metric_F1)
-        thresholds.append(threshold_bump)
+        thresholds.append(round(threshold_bump, 2))
         threshold_bump = threshold_bump + (threshold_bump * bump_pct)
     fig = px.line( x=thresholds, y=scores)
     maxJ = max(scores)
@@ -495,9 +495,11 @@ def perform_clustering(df, customer_type=None, n_clusters=4):
         f"PCA variance explained: PC1={var1:.1f}%, PC2={var2:.1f}%",
         "",
     ]
+    total_active = len(df_active)
     for i in range(n_clusters):
-        c     = df_active[df_active['cluster'] == i]
-        parts = [f"n={len(c):,}"]
+        c   = df_active[df_active['cluster'] == i]
+        pct = 100 * len(c) / total_active if total_active > 0 else 0
+        parts = [f"n={len(c):,} ({pct:.1f}% of active accounts)"]
         for col in numeric_cols:
             parts.append(f"{col}={c[col].mean():.1f}")
         stats_lines.append(f"  Cluster {i+1}: " + ", ".join(parts))
@@ -588,14 +590,26 @@ def smartseg_tree_dynamic(df_clustered, seg_label="All", dims=None):
             add_row(node_id, parent_id, val_str, grp, cidx=cidx)
             build_nodes(grp, node_id, remaining_dims[1:], cidx)
 
+    SMALL_CLUSTER_THRESHOLD = 0.01  # clusters < 1% of total go into a "Small Clusters" group
+
+    total_rows = len(df)
+    small_clusters = {cl for cl, grp in df.groupby('cluster_label')
+                      if len(grp) / total_rows < SMALL_CLUSTER_THRESHOLD} if total_rows > 0 else set()
+
     # Root
     add_row('All', '', f'Smart Segments - {seg_label}', df, cidx=None)
 
+    # Add a "Small Clusters" bucket if any clusters are below threshold
+    if small_clusters:
+        df_small = df[df['cluster_label'].isin(small_clusters)]
+        add_row('SMALL', 'All', f'Small Clusters (<1%) — {len(df_small):,} accounts', df_small, cidx=None)
+
     # Cluster level
     for cl, grp in df.groupby('cluster_label'):
-        cid = f"CL__{cl}"
+        cid  = f"CL__{cl}"
         cidx = next((k for k, v in cluster_titles.items() if v == cl), None)
-        add_row(cid, 'All', cl, grp, cidx=cidx)
+        parent = 'SMALL' if cl in small_clusters else 'All'
+        add_row(cid, parent, cl, grp, cidx=cidx)
 
         if isinstance(dims, dict):
             # customer_type is always the first level; each type gets its own sub-dims
@@ -612,6 +626,14 @@ def smartseg_tree_dynamic(df_clustered, seg_label="All", dims=None):
             build_nodes(grp, cid, active_dims, cidx)
 
     tree_df = pd.DataFrame(rows)
+
+    # Boost small cluster display values so they're visible in the treemap.
+    # Use 5% of total as the minimum display size; actual counts are shown in hover labels.
+    if small_clusters:
+        min_display = int(max(total_rows * 0.05, 1))
+        small_ids = {f"CL__{cl}" for cl in small_clusters} | {'SMALL'}
+        tree_df.loc[tree_df['id'].isin(small_ids), 'NUM_COUNT'] = \
+            tree_df.loc[tree_df['id'].isin(small_ids), 'NUM_COUNT'].clip(lower=min_display).astype(int)
 
     # Per-node colors: neutral grey for root, cluster color for all other nodes
     node_colors = []
@@ -642,9 +664,10 @@ def smartseg_tree_dynamic(df_clustered, seg_label="All", dims=None):
             'Avg Trxns/Week: %{customdata[0]:.1f}<br>'
             'Avg Weekly Trxn Amt: $%{customdata[1]:.0f}<br>'
             'Avg Monthly Trxn Amt: $%{customdata[3]:.0f}<br>'
-            'Avg Income: $%{customdata[4]:.0f}<br>'
-            'Avg Age: %{customdata[5]:.0f}<br>'
-            '<extra></extra>'
+            + ('' if seg_label == 'Business' else
+               'Avg Income: $%{customdata[4]:.0f}<br>'
+               'Avg Age: %{customdata[5]:.0f}<br>')
+            + '<extra></extra>'
         ),
         texttemplate=(
             '<b>%{label}</b><br>'
