@@ -16,7 +16,7 @@ if _PROJECT_ROOT not in sys.path:
 from config import CHROMA_PATH
 
 COLLECTION_NAME = "framl_kb"
-TOP_K = 8
+TOP_K = 3
 
 SYSTEM_PROMPT = (
     "You are a FRAML policy and compliance specialist. "

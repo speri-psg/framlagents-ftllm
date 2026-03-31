@@ -613,7 +613,11 @@ def handle_chat(new_message, pending_prompt, messages):
     try:
         global _current_query
         _current_query = query
-        agent_text, chart_results = orchestrator.run(query, tool_executor)
+        last_assistant = next(
+            (m["content"] for m in reversed(messages) if m.get("role") == "assistant" and isinstance(m.get("content"), str)),
+            ""
+        )
+        agent_text, chart_results = orchestrator.run(query, tool_executor, last_assistant)
     except Exception as e:
         import traceback
         traceback.print_exc()

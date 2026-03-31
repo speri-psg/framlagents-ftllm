@@ -79,17 +79,18 @@ class OrchestratorAgent:
         }
         self._client = OpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
 
-    def _route(self, query: str) -> list:
+    def _route(self, query: str, last_assistant: str = "") -> list:
         """LLM-based routing — classify query into agent labels."""
         try:
+            classify_messages = [{"role": "system", "content": _CLASSIFY_SYSTEM}]
+            if last_assistant:
+                classify_messages.append({"role": "assistant", "content": last_assistant})
+            classify_messages.append({"role": "user", "content": query})
             resp = self._client.chat.completions.create(
                 model=OLLAMA_MODEL,
                 max_tokens=20,
                 temperature=0,
-                messages=[
-                    {"role": "system", "content": _CLASSIFY_SYSTEM},
-                    {"role": "user",   "content": query},
-                ],
+                messages=classify_messages,
             )
             raw = resp.choices[0].message.content or ""
             labels = [l.strip().lower() for l in raw.split(",") if l.strip()]
@@ -100,12 +101,12 @@ class OrchestratorAgent:
         print(f"[orchestrator] routing to: {labels}")
         return labels
 
-    def run(self, query: str, tool_executor) -> tuple:
+    def run(self, query: str, tool_executor, last_assistant: str = "") -> tuple:
         """
         Route query via LLM, run required agents (in parallel if >1), merge results.
         Returns: (combined_text, all_chart_results)
         """
-        labels = self._route(query)
+        labels = self._route(query, last_assistant)
 
         if "greeting" in labels:
             return self._GREETING, []
