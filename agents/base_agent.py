@@ -21,12 +21,13 @@ MAX_TOOL_ITERATIONS = 6  # prevent infinite loops if model misfires
 
 
 class BaseAgent:
-    def __init__(self, name: str, system_prompt: str, tools: list):
+    def __init__(self, name: str, system_prompt: str, tools: list, max_tool_calls: int = 1):
         self.name = name
         self.system_prompt = system_prompt
-        self.tools = tools  # OpenAI function-calling format
+        self.tools = tools
         self.client = OpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
         self.model = OLLAMA_MODEL
+        self.max_tool_calls = max_tool_calls
 
     def run(self, query: str, tool_executor, policy_context: str = "") -> tuple:
         """
@@ -40,6 +41,7 @@ class BaseAgent:
             {"role": "user", "content": user_content},
         ]
         chart_results = []
+        tool_call_count = 0
 
         create_kwargs = dict(
             model=self.model,
@@ -88,7 +90,10 @@ class BaseAgent:
                         "content": result_text,
                     })
 
+                tool_call_count += 1
                 create_kwargs["messages"] = messages
+                if tool_call_count >= self.max_tool_calls:
+                    create_kwargs["tool_choice"] = "none"
 
             else:
                 # Final text response (or base model answered without tool call)

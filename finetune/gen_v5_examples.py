@@ -292,18 +292,17 @@ SEG_STATS = """\
 === PRE-COMPUTED SEGMENT STATS (copy verbatim, do not compute new numbers) ===
 Business: accounts=367 (7.3% of total), alerts=355 (7.3% of all alerts), FP=323 (FP rate=91.0% of alerts), FN=44
 Individual: accounts=4,668 (92.7% of total), alerts=4,480 (92.7% of all alerts), FP=4,028 (FP rate=89.9% of alerts), FN=640
-=== END PRE-COMPUTED SEGMENT STATS ===
-Copy the above verbatim. Do NOT compute, derive, or invent any other numbers or percentages. Do NOT suggest specific dollar thresholds."""
+=== END PRE-COMPUTED SEGMENT STATS ==="""
 
 BIZ_4CLUSTER = """\
 Segment: Business | Active accounts: 14,423 (0 with no transactions)
 Clusters: 4 | Features: 5 numeric + 8 encoded categorical
 PCA variance explained: PC1=38.2%, PC2=18.1%
 
-  Cluster 1: n=1,242 (8.6% of active accounts), avg_num_trxns=6.1, avg_weekly_trxn_amt=59380.3, trxn_amt_monthly=183521.0, CURRENT_BALANCE=452130.0, ACCT_AGE_YEARS=8.2
-  Cluster 2: n=12,506 (86.7% of active accounts), avg_num_trxns=4.1, avg_weekly_trxn_amt=36519.0, trxn_amt_monthly=89234.0, CURRENT_BALANCE=231450.0, ACCT_AGE_YEARS=5.3
+  Cluster 1: n=1,242 (8.6% of active accounts), avg_num_trxns=0.6, avg_weekly_trxn_amt=59380.3, trxn_amt_monthly=183521.0, CURRENT_BALANCE=452130.0, ACCT_AGE_YEARS=8.2
+  Cluster 2: n=12,506 (86.7% of active accounts), avg_num_trxns=0.4, avg_weekly_trxn_amt=36519.0, trxn_amt_monthly=89234.0, CURRENT_BALANCE=231450.0, ACCT_AGE_YEARS=5.3
   Cluster 3: n=32 (0.2% of active accounts), avg_num_trxns=0.5, avg_weekly_trxn_amt=38458.3, trxn_amt_monthly=102283.0, CURRENT_BALANCE=3521000.0, ACCT_AGE_YEARS=4.7
-  Cluster 4: n=643 (4.5% of active accounts), avg_num_trxns=12.3, avg_weekly_trxn_amt=783508.0, trxn_amt_monthly=2914231.0, CURRENT_BALANCE=1823450.0, ACCT_AGE_YEARS=6.1"""
+  Cluster 4: n=643 (4.5% of active accounts), avg_num_trxns=1.0, avg_weekly_trxn_amt=783507.6, trxn_amt_monthly=2914231.0, CURRENT_BALANCE=1823450.0, ACCT_AGE_YEARS=6.1"""
 
 BIZ_6CLUSTER = """\
 Segment: Business | Active accounts: 14,423 (0 with no transactions)
@@ -313,7 +312,7 @@ PCA variance explained: PC1=38.2%, PC2=18.1%
   Cluster 1: n=10,841 (75.2% of active accounts), avg_num_trxns=3.8, avg_weekly_trxn_amt=32100.0, trxn_amt_monthly=78400.0, CURRENT_BALANCE=198000.0, ACCT_AGE_YEARS=4.9
   Cluster 2: n=1,712 (11.9% of active accounts), avg_num_trxns=6.4, avg_weekly_trxn_amt=68200.0, trxn_amt_monthly=212500.0, CURRENT_BALANCE=510000.0, ACCT_AGE_YEARS=8.5
   Cluster 3: n=875 (6.1% of active accounts), avg_num_trxns=9.2, avg_weekly_trxn_amt=185300.0, trxn_amt_monthly=694100.0, CURRENT_BALANCE=920000.0, ACCT_AGE_YEARS=7.2
-  Cluster 4: n=643 (4.5% of active accounts), avg_num_trxns=12.3, avg_weekly_trxn_amt=783508.0, trxn_amt_monthly=2914231.0, CURRENT_BALANCE=1823450.0, ACCT_AGE_YEARS=6.1
+  Cluster 4: n=643 (4.5% of active accounts), avg_num_trxns=1.0, avg_weekly_trxn_amt=783507.6, trxn_amt_monthly=2914231.0, CURRENT_BALANCE=1823450.0, ACCT_AGE_YEARS=6.1
   Cluster 5: n=320 (2.2% of active accounts), avg_num_trxns=1.1, avg_weekly_trxn_amt=41200.0, trxn_amt_monthly=115600.0, CURRENT_BALANCE=2140000.0, ACCT_AGE_YEARS=3.8
   Cluster 6: n=32 (0.2% of active accounts), avg_num_trxns=0.5, avg_weekly_trxn_amt=38458.0, trxn_amt_monthly=102283.0, CURRENT_BALANCE=3521000.0, ACCT_AGE_YEARS=4.7"""
 

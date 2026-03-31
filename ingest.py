@@ -5,6 +5,7 @@
 import chromadb
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 import pypdf
+import docx
 import pandas as pd
 import os
 import glob
@@ -33,6 +34,26 @@ def ingest_pdf(path):
         if text:
             pages_text.append(text)
     full_text = " ".join(pages_text)
+    return chunk_text(full_text)
+
+
+def ingest_docx(path):
+    try:
+        doc = docx.Document(path)
+        parts = [p.text for p in doc.paragraphs if p.text.strip()]
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    if cell.text.strip():
+                        parts.append(cell.text.strip())
+        full_text = " ".join(parts)
+    except Exception:
+        # Fallback: extract raw text from word/document.xml directly
+        import zipfile, re
+        with zipfile.ZipFile(path) as z:
+            xml = z.read("word/document.xml").decode("utf-8", errors="ignore")
+        full_text = re.sub(r"<[^>]+>", " ", xml)
+        full_text = re.sub(r"\s+", " ", full_text).strip()
     return chunk_text(full_text)
 
 
@@ -71,6 +92,22 @@ def main():
                 all_chunks.append(chunk)
                 all_ids.append(f"chunk_{chunk_id}")
                 all_metadata.append({"source": fname, "type": "pdf"})
+                chunk_id += 1
+            print(f"  -> {len(chunks)} chunks")
+        except Exception as e:
+            print(f"  ERROR reading {fname}: {e}")
+
+    # Ingest Word docs from docs/
+    docx_files = glob.glob(os.path.join(DOCS_FOLDER, "*.docx"))
+    for docx_path in docx_files:
+        fname = os.path.basename(docx_path)
+        print(f"Ingesting Word doc: {fname} ...")
+        try:
+            chunks = ingest_docx(docx_path)
+            for chunk in chunks:
+                all_chunks.append(chunk)
+                all_ids.append(f"chunk_{chunk_id}")
+                all_metadata.append({"source": fname, "type": "docx"})
                 chunk_id += 1
             print(f"  -> {len(chunks)} chunks")
         except Exception as e:
