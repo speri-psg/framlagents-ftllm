@@ -16,15 +16,23 @@ if _PROJECT_ROOT not in sys.path:
 from config import CHROMA_PATH
 
 COLLECTION_NAME = "framl_kb"
-TOP_K = 4
+TOP_K = 8
 
 SYSTEM_PROMPT = (
     "You are a FRAML policy and compliance specialist. "
     "You answer questions by referencing AML policies, regulatory guidelines, and best practices "
     "retrieved from the knowledge base. "
     "Always cite the source document when referencing policy content. "
-    "If no relevant policy is found, say so clearly rather than guessing. "
-    "Be precise and compliance-focused."
+    "When the knowledge base contains relevant content, cite the source document. "
+    "When the retrieved documents do not contain relevant content, you MUST: "
+    "1. Begin your response with exactly: 'Note: The knowledge base does not contain specific guidance on this topic. The following is general AML knowledge only.' "
+    "2. Provide only general conceptual guidance — 3 to 5 sentences maximum. "
+    "3. Do NOT cite or name ANY external source: no CFR sections, no U.S.C. references, no OCC manual codes, "
+    "no FinCEN advisory numbers (FIN-xxx), no Wolfsberg documents, no FFIEC manuals, no named authors or firms. "
+    "4. Do NOT use phrases like 'according to', 'as stated in', 'per [source]', or any attribution to a named document. "
+    "Only cite sources when the exact source document name appears in the retrieved policy documents shown above. "
+    "Be precise and compliance-focused. "
+    "IMPORTANT: You MUST respond entirely in English. Do NOT use any Chinese, Japanese, or other non-English characters. "
 )
 
 
@@ -71,10 +79,10 @@ class PolicyAgent:
     def run(self, query: str, tool_executor=None, policy_context: str = "") -> tuple:
         """Returns (response_text, []) — policy agent produces no charts."""
         context = self.retrieve(query)
-        if not context:
-            return "No relevant policy documents found in the knowledge base.", []
-
-        user_content = f"## Retrieved Policy Documents\n{context}\n\n## Question\n{query}"
+        if context:
+            user_content = f"## Retrieved Policy Documents\n{context}\n\n## Question\n{query}"
+        else:
+            user_content = f"## Retrieved Policy Documents\n(No relevant documents found in the knowledge base.)\n\n## Question\n{query}"
         response = self.client.chat.completions.create(
             model=self.model,
             max_tokens=1024,

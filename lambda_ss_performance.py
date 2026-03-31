@@ -501,7 +501,9 @@ def perform_clustering(df, customer_type=None, n_clusters=4):
         pct = 100 * len(c) / total_active if total_active > 0 else 0
         parts = [f"n={len(c):,} ({pct:.1f}% of active accounts)"]
         for col in numeric_cols:
-            parts.append(f"{col}={c[col].mean():.1f}")
+            val = c[col].median()
+            if not (val != val):  # skip NaN
+                parts.append(f"{col}={val:.1f}")
         stats_lines.append(f"  Cluster {i+1}: " + ", ".join(parts))
 
     return fig, "\n".join(stats_lines), df_active

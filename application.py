@@ -30,6 +30,8 @@ from config import ALERTS_CSV, SS_CSV, SAR_CSV, OLLAMA_MODEL, OLLAMA_BASE_URL
 from agents import OrchestratorAgent
 import lambda_ss_performance
 
+MAX_SWEEP_ROWS = 10  # max sweep points passed to model (prevents token limit cutoff)
+
 # ── Data loading ──────────────────────────────────────────────────────────────
 _df_raw = pd.read_csv(ALERTS_CSV, sep="\t")
 _df_raw = _df_raw.rename(columns={
@@ -121,9 +123,10 @@ def compute_threshold_stats(df_seg, threshold):
     sweep = []
     t = t_min
     while t <= t_max + step:
-        fp = df_seg[(df_seg[threshold] >= t) & (df_seg["false_positives"] == 1)].shape[0]
-        fn = df_seg[(df_seg[threshold] <  t) & (df_seg["false_negatives"] == 1)].shape[0]
-        sweep.append((t, fp, fn))
+        t_r = round(t, 2)
+        fp = df_seg[(df_seg[threshold] >= t_r) & (df_seg["false_positives"] == 1)].shape[0]
+        fn = df_seg[(df_seg[threshold] <  t_r) & (df_seg["false_negatives"] == 1)].shape[0]
+        sweep.append((t_r, fp, fn))
         t += step
 
     # ── Derive key facts ──────────────────────────────────────────────────────
@@ -133,7 +136,7 @@ def compute_threshold_stats(df_seg, threshold):
 
     fn_first_nonzero = next(((t, fn) for t, fp, fn in sweep if fn > 0), None)
     fp_first_zero    = next(((t, fp) for t, fp, fn in sweep if fp == 0), None)
-    fn_zero_end      = fn_first_nonzero[0] - step if fn_first_nonzero else t_max
+    fn_zero_end      = round(fn_first_nonzero[0] - step, 2) if fn_first_nonzero else t_max
 
     crossover = min(sweep, key=lambda x: abs(x[1] - x[2]))
 
@@ -189,9 +192,8 @@ def compute_threshold_stats(df_seg, threshold):
 
     lines.append("=== END PRE-COMPUTED ANALYSIS ===")
     lines.append("")
-    MAX_SWEEP_ROWS = 10
     shown = sweep[:MAX_SWEEP_ROWS]
-    lines.append(f"Raw sweep (threshold range {t_min}–{t_max}, step={step}, showing first {len(shown)} of {len(sweep)} points):")
+    lines.append(f"Raw sweep (threshold range {round(t_min,2)}–{round(t_max,2)}, step={step}, showing first {len(shown)} of {len(sweep)} points):")
     lines += [f"  t={t}: FP={fp}, FN={fn}" for t, fp, fn in shown]
     if len(sweep) > MAX_SWEEP_ROWS:
         lines.append(f"  ... ({len(sweep) - MAX_SWEEP_ROWS} additional points not shown)")
@@ -218,7 +220,6 @@ def compute_segment_stats(df):
             f"FP={fp:,} (FP rate={fp_rate}% of alerts), FN={fn:,}"
         )
     lines.append("=== END PRE-COMPUTED SEGMENT STATS ===")
-    lines.append("Copy the above verbatim. Do NOT compute, derive, or invent any other numbers or percentages. Do NOT suggest specific dollar thresholds.")
     return "\n".join(lines)
 
 
@@ -287,8 +288,11 @@ def compute_sar_backtest(df_sar_seg, sar_col, segment_name):
     lines.append(f"At the highest threshold ({sweep[-1][0]}): {sweep[-1][1]} SARs caught, {sweep[-1][2]} missed (100.0% missed).")
     lines.append("=== END PRE-COMPUTED SAR BACKTEST ===")
     lines.append("")
-    lines.append(f"Raw sweep (range {t_min}--{t_max}, step={step}):")
-    lines += [f"  t={t}: caught={c}, missed={m} ({round(100*c/total_sars,1)}% catch rate)" for t, c, m in sweep]
+    shown = sweep[:MAX_SWEEP_ROWS]
+    lines.append(f"Raw sweep (range {round(t_min,2)}--{round(t_max,2)}, step={step}, showing first {len(shown)} of {len(sweep)} points):")
+    lines += [f"  t={t}: caught={c}, missed={m} ({round(100*c/total_sars,1)}% catch rate)" for t, c, m in shown]
+    if len(sweep) > MAX_SWEEP_ROWS:
+        lines.append(f"  ... ({len(sweep) - MAX_SWEEP_ROWS} additional points not shown)")
 
     return "\n".join(lines)
 
@@ -657,6 +661,8 @@ def handle_chat(new_message, pending_prompt, messages):
     agent_text = re.sub(r'PRE-COMPUTED ANALYSIS[:\s]*\n?', '', agent_text).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED SEGMENT STATS.*?===\n?', '', agent_text).strip()
     agent_text = re.sub(r'===\s*END PRE-COMPUTED SEGMENT STATS\s*===\n?', '', agent_text).strip()
+    agent_text = re.sub(r'===.*?PRE-COMPUTED SAR BACKTEST.*?===\n?', '', agent_text).strip()
+    agent_text = re.sub(r'===\s*END PRE-COMPUTED SAR BACKTEST\s*===\n?', '', agent_text).strip()
 
     if chart_results:
         content = [{"type": "text", "text": agent_text}] if agent_text else []
