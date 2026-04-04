@@ -1,0 +1,490 @@
+"""
+make_figures.py — Plotly table figures for all pre-computed tool results.
+
+Each function returns a go.Figure (Table trace) styled consistently.
+Called from application.py tool_executor alongside the text result.
+"""
+
+import plotly.graph_objects as go
+import pandas as pd
+import numpy as np
+
+# ── Shared style ──────────────────────────────────────────────────────────────
+_HEADER_FILL   = "#1a3a5c"
+_HEADER_FONT   = "white"
+_ROW_FILL_ODD  = "#f0f4f8"
+_ROW_FILL_EVEN = "#ffffff"
+_FONT_FAMILY   = "monospace"
+_FONT_SIZE     = 12
+
+
+def _alternating_fill(n, odd=_ROW_FILL_ODD, even=_ROW_FILL_EVEN):
+    return [odd if i % 2 == 0 else even for i in range(n)]
+
+
+# ── 1. list_rules ─────────────────────────────────────────────────────────────
+
+def rule_list_figure(df_rule_sweep):
+    """Table showing all rules with SAR/FP counts and precision."""
+    from lambda_rule_analysis import RULE_CATALOGUE
+
+    rows = []
+    for _, entry in RULE_CATALOGUE.items():
+        rf  = entry["name"]
+        grp = df_rule_sweep[df_rule_sweep["risk_factor"] == rf]
+        n   = len(grp)
+        sar = int(grp["is_sar"].sum()) if n > 0 else 0
+        fp  = int((grp["is_sar"] == 0).sum()) if n > 0 else 0
+        nul = int(grp["is_sar"].isna().sum()) if n > 0 else 0
+        prec = f"{round(100*sar/(sar+fp), 1)}%" if (sar + fp) > 0 else "n/a"
+        sweep_keys = ", ".join(entry["sweep_params"].keys())
+        rows.append([rf, n, sar, fp, prec, sweep_keys])
+
+    cols = ["Risk Factor", "Alerted", "SAR", "FP", "Precision", "Sweep Params"]
+    df = pd.DataFrame(rows, columns=cols)
+    n  = len(df)
+
+    fig = go.Figure(go.Table(
+        header=dict(
+            values=[f"<b>{c}</b>" for c in cols],
+            fill_color=_HEADER_FILL,
+            font=dict(color=_HEADER_FONT, family=_FONT_FAMILY, size=_FONT_SIZE),
+            align=["left", "right", "right", "right", "right", "right", "left"],
+            height=32,
+        ),
+        cells=dict(
+            values=[df[c].tolist() for c in cols],
+            fill_color=[_alternating_fill(n)] * len(cols),
+            font=dict(family=_FONT_FAMILY, size=_FONT_SIZE),
+            align=["left", "right", "right", "right", "right", "right", "left"],
+            height=28,
+        ),
+    ))
+    fig.update_layout(
+        title="AML Rule Performance Overview",
+        margin=dict(l=10, r=10, t=40, b=10),
+    )
+    return fig
+
+
+# ── 2. rule_sar_backtest ──────────────────────────────────────────────────────
+
+def rule_sweep_figure(df_rule_sweep, risk_factor_keyword, sweep_param=None):
+    """Sweep table for a specific rule and condition parameter."""
+    from lambda_rule_analysis import RULE_CATALOGUE, _match_rule
+
+    rf_name, entry = _match_rule(risk_factor_keyword)
+    if entry is None:
+        return None
+
+    if sweep_param is None or sweep_param not in entry["sweep_params"]:
+        sweep_param = entry["default_sweep"]
+    sp  = entry["sweep_params"][sweep_param]
+    col = sp["col"]
+
+    rule_df = df_rule_sweep[df_rule_sweep["risk_factor"] == rf_name].copy()
+    known   = rule_df.dropna(subset=["is_sar", col]).copy()
+
+    total_sars = int((known["is_sar"] == 1).sum())
+    if len(known) == 0 or total_sars == 0:
+        return None
+
+    from lambda_rule_analysis import _sweep_points as _lra_sweep_points
+    cur        = float(sp["current"])
+    raw_points = _lra_sweep_points(known, sp, n_steps=16)
+
+    def _fmt_thresh(t, is_integer):
+        if is_integer:
+            return f"{int(t):,}"
+        return f"{t:,.2f}"
+
+    rows = []
+    for t in raw_points:
+        if sp["direction"] == "gte":
+            caught = int(((known[col] >= t) & (known["is_sar"] == 1)).sum())
+            fp_rem = int(((known[col] >= t) & (known["is_sar"] == 0)).sum())
+        else:
+            caught = int(((known[col] <= t) & (known["is_sar"] == 1)).sum())
+            fp_rem = int(((known[col] <= t) & (known["is_sar"] == 0)).sum())
+        missed    = total_sars - caught
+        sar_pct   = round(100 * caught / total_sars, 1)
+        precision = round(100 * caught / (caught + fp_rem), 1) if (caught + fp_rem) > 0 else 0.0
+        is_cur    = (int(round(t)) == int(round(cur))) if integer_axis else (t == round(cur, 2))
+        rows.append([
+            _fmt_thresh(t, integer_axis) + (" *" if is_cur else ""),
+            caught,
+            fp_rem,
+            missed,
+            f"{sar_pct}%",
+            f"{precision}%",
+        ])
+
+    cols = [f"{sp['label']} (* = current)", "SAR Caught", "FP Remain", "SAR Missed", "SAR Catch %", "Precision"]
+    df_t = pd.DataFrame(rows, columns=cols)
+    n    = len(df_t)
+
+    # Color SAR% column: green when high, red when low
+    # Color Precision column: green when high, red when low
+    sar_pcts   = [float(r[4].replace("%", "")) for r in rows]
+    prec_vals  = [float(r[5].replace("%", "")) for r in rows]
+    cell_colors = []
+    for c_idx, col_name in enumerate(cols):
+        if col_name == "SAR Catch %":
+            colors = []
+            for pct in sar_pcts:
+                if pct >= 90:
+                    colors.append("#c8e6c9")
+                elif pct >= 50:
+                    colors.append("#fff9c4")
+                else:
+                    colors.append("#ffcdd2")
+            cell_colors.append(colors)
+        elif col_name == "Precision":
+            colors = []
+            for pct in prec_vals:
+                if pct >= 50:
+                    colors.append("#c8e6c9")
+                elif pct >= 25:
+                    colors.append("#fff9c4")
+                else:
+                    colors.append("#ffcdd2")
+            cell_colors.append(colors)
+        else:
+            cell_colors.append(_alternating_fill(n))
+
+    # Highlight current row
+    cur_indices = [i for i, r in enumerate(rows) if r[0].endswith(" *")]
+    for c_idx in range(len(cols)):
+        for ci in cur_indices:
+            cell_colors[c_idx][ci] = "#bbdefb"   # light blue
+
+    fig = go.Figure(go.Table(
+        header=dict(
+            values=[f"<b>{c}</b>" for c in cols],
+            fill_color=_HEADER_FILL,
+            font=dict(color=_HEADER_FONT, family=_FONT_FAMILY, size=_FONT_SIZE),
+            align=["right"] * len(cols),
+            height=32,
+        ),
+        cells=dict(
+            values=[df_t[c].tolist() for c in cols],
+            fill_color=cell_colors,
+            font=dict(family=_FONT_FAMILY, size=_FONT_SIZE),
+            align=["right"] * len(cols),
+            height=26,
+        ),
+    ))
+    fig.update_layout(
+        title=f"{rf_name} — {sweep_param} sweep (* = current condition value)",
+        margin=dict(l=10, r=10, t=40, b=10),
+    )
+    return fig
+
+
+# ── 3. threshold_tuning ───────────────────────────────────────────────────────
+
+_INTEGER_THRESHOLD_COLS = {"AVG_TRXNS_WEEK", "avg_trxns_week"}
+
+def threshold_tuning_figure(df_seg, threshold_col, segment_name):
+    """FP/FN sweep table for threshold tuning."""
+    import math as _math
+    is_int_col = threshold_col in _INTEGER_THRESHOLD_COLS or df_seg[threshold_col].dropna().apply(lambda x: x == int(x)).all()
+    cur_val   = float(df_seg[threshold_col].median())
+    raw_step  = cur_val / 4
+    mag       = 10 ** _math.floor(_math.log10(max(raw_step, 1)))
+    _n        = raw_step / mag
+    if _n < 1.5:   nice = 1
+    elif _n < 3.5: nice = 2
+    elif _n < 7.5: nice = 5
+    else:          nice = 10
+    step  = int(nice * mag)
+    t_min = max(step, int(cur_val - 4 * step))
+    t_max = int(cur_val + 4 * step)
+
+    rows = []
+    t = t_min
+    while t <= t_max + step:
+        t_r = round(t, 2)
+        fp  = int(df_seg[(df_seg[threshold_col] >= t_r) & (df_seg["false_positives"] == 1)].shape[0])
+        fn  = int(df_seg[(df_seg[threshold_col] <  t_r) & (df_seg["false_negatives"] == 1)].shape[0])
+        label = f"{int(t_r):,}" if is_int_col else f"{t_r:,.2f}"
+        rows.append([label, fp, fn, fp + fn])
+        t += step
+
+    cols = ["Threshold", "False Positives", "False Negatives", "Total FP+FN"]
+    df_t = pd.DataFrame(rows, columns=cols)
+    n    = len(df_t)
+
+    fp_vals = [r[1] for r in rows]
+    fn_vals = [r[2] for r in rows]
+    max_fp  = max(fp_vals) if fp_vals else 1
+    max_fn  = max(fn_vals) if fn_vals else 1
+
+    # Colour FP: green when low, red when high; FN: inverse
+    fp_colors, fn_colors = [], []
+    for fp, fn in zip(fp_vals, fn_vals):
+        fp_pct = fp / max_fp if max_fp > 0 else 0
+        fn_pct = fn / max_fn if max_fn > 0 else 0
+        fp_colors.append("#ffcdd2" if fp_pct > 0.5 else "#c8e6c9" if fp_pct < 0.2 else "#fff9c4")
+        fn_colors.append("#ffcdd2" if fn_pct > 0.5 else "#c8e6c9" if fn_pct < 0.2 else "#fff9c4")
+
+    cell_colors = [
+        _alternating_fill(n),
+        fp_colors,
+        fn_colors,
+        _alternating_fill(n),
+    ]
+
+    fig = go.Figure(go.Table(
+        header=dict(
+            values=[f"<b>{c}</b>" for c in cols],
+            fill_color=_HEADER_FILL,
+            font=dict(color=_HEADER_FONT, family=_FONT_FAMILY, size=_FONT_SIZE),
+            align=["right", "right", "right", "right"],
+            height=32,
+        ),
+        cells=dict(
+            values=[df_t[c].tolist() for c in cols],
+            fill_color=cell_colors,
+            font=dict(family=_FONT_FAMILY, size=_FONT_SIZE),
+            align=["right", "right", "right", "right"],
+            height=26,
+        ),
+    ))
+    fig.update_layout(
+        title=f"Threshold Tuning — {segment_name} / {threshold_col}",
+        margin=dict(l=10, r=10, t=40, b=10),
+    )
+    return fig
+
+
+# ── 4. sar_backtest ───────────────────────────────────────────────────────────
+
+def sar_backtest_figure(df_sar_seg, sar_col, segment_name):
+    """SAR catch rate sweep table."""
+    df = df_sar_seg.dropna(subset=[sar_col]).copy()
+    total_sars = int(df["is_sar"].sum())
+    if total_sars == 0:
+        return None
+
+    t_min = df[sar_col].min()
+    t_max = df[sar_col].max()
+    is_int_col = sar_col in _INTEGER_THRESHOLD_COLS or df[sar_col].dropna().apply(lambda x: x == int(x)).all()
+    step  = max(1, int((t_max - t_min) / 100))
+
+    rows = []
+    t = t_min
+    while t <= t_max + step:
+        t_r    = round(t, 2)
+        caught = int(((df[sar_col] >= t_r) & (df["is_sar"] == 1)).sum())
+        missed = total_sars - caught
+        pct    = round(100 * caught / total_sars, 1)
+        label  = f"{int(t_r):,}" if is_int_col else f"{t_r:,.2f}"
+        rows.append([label, caught, missed, f"{pct}%"])
+        t += step
+
+    cols = ["Threshold", "SAR Caught", "SAR Missed", "Catch Rate"]
+    df_t = pd.DataFrame(rows, columns=cols)
+    n    = len(df_t)
+
+    pcts = [float(r[3].replace("%", "")) for r in rows]
+    catch_colors = []
+    for pct in pcts:
+        catch_colors.append("#c8e6c9" if pct >= 90 else "#fff9c4" if pct >= 50 else "#ffcdd2")
+
+    cell_colors = [
+        _alternating_fill(n),
+        _alternating_fill(n),
+        _alternating_fill(n),
+        catch_colors,
+    ]
+
+    fig = go.Figure(go.Table(
+        header=dict(
+            values=[f"<b>{c}</b>" for c in cols],
+            fill_color=_HEADER_FILL,
+            font=dict(color=_HEADER_FONT, family=_FONT_FAMILY, size=_FONT_SIZE),
+            align=["right", "right", "right", "right"],
+            height=32,
+        ),
+        cells=dict(
+            values=[df_t[c].tolist() for c in cols],
+            fill_color=cell_colors,
+            font=dict(family=_FONT_FAMILY, size=_FONT_SIZE),
+            align=["right", "right", "right", "right"],
+            height=26,
+        ),
+    ))
+    fig.update_layout(
+        title=f"SAR Backtest — {segment_name} / {sar_col}",
+        margin=dict(l=10, r=10, t=40, b=10),
+    )
+    return fig
+
+
+# ── 5. segment_stats / alerts_distribution ────────────────────────────────────
+
+def segment_stats_figure(df):
+    """Segment-level alert and FP/FN summary table."""
+    total_alerts   = int(df["alerts"].sum())
+    total_accounts = len(df)
+
+    rows = []
+    for seg_id, name in [(0, "Business"), (1, "Individual")]:
+        seg      = df[df["smart_segment_id"] == seg_id]
+        n        = len(seg)
+        alerts   = int(seg["alerts"].sum())
+        fp       = int(seg["false_positives"].sum())
+        fn       = int(seg["false_negatives"].sum())
+        fp_rate  = f"{round(100*fp/alerts, 1)}%" if alerts > 0 else "n/a"
+        acct_pct = f"{round(100*n/total_accounts, 1)}%"
+        rows.append([name, f"{n:,}", acct_pct, f"{alerts:,}", f"{fp:,}", fp_rate, f"{fn:,}"])
+
+    cols = ["Segment", "Accounts", "% of Total", "Alerts", "FP", "FP Rate", "FN"]
+    df_t = pd.DataFrame(rows, columns=cols)
+
+    fig = go.Figure(go.Table(
+        header=dict(
+            values=[f"<b>{c}</b>" for c in cols],
+            fill_color=_HEADER_FILL,
+            font=dict(color=_HEADER_FONT, family=_FONT_FAMILY, size=_FONT_SIZE),
+            align=["left", "right", "right", "right", "right", "right", "right"],
+            height=32,
+        ),
+        cells=dict(
+            values=[df_t[c].tolist() for c in cols],
+            fill_color=[["#f0f4f8", "#ffffff"]] * len(cols),
+            font=dict(family=_FONT_FAMILY, size=_FONT_SIZE),
+            align=["left", "right", "right", "right", "right", "right", "right"],
+            height=28,
+        ),
+    ))
+    fig.update_layout(
+        title="Segment Statistics — Alerts, FP, FN",
+        margin=dict(l=10, r=10, t=40, b=10),
+    )
+    return fig
+
+
+# ── 7. rule_2d_sweep heatmap ──────────────────────────────────────────────────
+
+def rule_2d_heatmap(grid_dict):
+    """
+    Single interactive heatmap: SAR catch % as colour, FP count in hover tooltip.
+    Current condition cell marked with a visible annotation.
+    Rows = param1 values (Y axis), columns = param2 values (X axis).
+    """
+    if grid_dict is None:
+        return None
+
+    p1_vals    = grid_dict["p1_vals"]
+    p2_vals    = grid_dict["p2_vals"]
+    sar_grid   = grid_dict["sar_grid"]
+    fp_grid    = grid_dict["fp_grid"]
+    total_sars = grid_dict["total_sars"]
+    total_fps  = grid_dict["total_fps"]
+    p1_label   = grid_dict["p1_label"]
+    p2_label   = grid_dict["p2_label"]
+    p1_cur     = grid_dict["p1_current"]
+    p2_cur     = grid_dict["p2_current"]
+    p1_fmt_pct = grid_dict.get("p1_format_pct", False)
+    p2_fmt_pct = grid_dict.get("p2_format_pct", False)
+    rf_name    = grid_dict["rf_name"]
+    param1     = grid_dict["param1"]
+    param2     = grid_dict["param2"]
+
+    sar_pct = [[round(100 * v / total_sars, 1) for v in row] for row in sar_grid]
+
+    def fmt(v, as_pct=False):
+        if as_pct:
+            pct = v * 100
+            return f"{pct:g}%"
+        if isinstance(v, float) and v == int(v):
+            v = int(v)
+        if isinstance(v, int):
+            return f"{v:,}" if abs(v) >= 1000 else str(v)
+        if abs(v) >= 1000:
+            return f"{v:,.0f}"
+        return f"{v:.3f}".rstrip("0").rstrip(".")
+
+    x_labels = [fmt(v, p2_fmt_pct) for v in p2_vals]
+    y_labels = [fmt(v, p1_fmt_pct) for v in p1_vals]
+
+    # Hover: axis coordinates + 2x2 confusion matrix (TP/FP/FN/TN)
+    # TP = alerted SAR  (green)   FP = alerted non-SAR  (red)
+    # FN = missed SAR   (red)     TN = correctly silent  (green)
+    _G = "color:#27ae60;font-weight:bold"   # green
+    _R = "color:#e74c3c;font-weight:bold"   # red
+
+    hover = []
+    for i, v1 in enumerate(p1_vals):
+        row_hover = []
+        for j, v2 in enumerate(p2_vals):
+            tp  = sar_grid[i][j]
+            fp  = fp_grid[i][j]
+            fn  = total_sars - tp
+            tn  = total_fps  - fp
+            pct = sar_pct[i][j]
+            prec = round(100 * tp / (tp + fp), 1) if (tp + fp) > 0 else 0.0
+            row_hover.append(
+                f"<b>{param1}</b>: {fmt(v1, p1_fmt_pct)}  |  <b>{param2}</b>: {fmt(v2, p2_fmt_pct)}<br><br>"
+                f"<span style='{_G}'>TP: {tp}</span>"
+                f"&nbsp;&nbsp;&nbsp;&nbsp;"
+                f"<span style='{_R}'>FP: {fp}</span><br>"
+                f"<span style='{_R}'>FN: {fn}</span>"
+                f"&nbsp;&nbsp;&nbsp;&nbsp;"
+                f"<span style='{_G}'>TN: {tn}</span><br><br>"
+                f"TP rate: {pct}%  |  Precision: {prec}%"
+            )
+        hover.append(row_hover)
+
+    # Current condition marker
+    cur_xi = min(range(len(p2_vals)), key=lambda i: abs(p2_vals[i] - float(p2_cur)))
+    cur_yi = min(range(len(p1_vals)), key=lambda i: abs(p1_vals[i] - float(p1_cur)))
+
+    annotations = [dict(
+        x=cur_xi,
+        y=cur_yi,
+        text="<b>NOW</b>",
+        showarrow=False,
+        font=dict(size=11, color="white"),
+        bgcolor="rgba(0,0,0,0.55)",
+        bordercolor="white",
+        borderwidth=1,
+        borderpad=2,
+    )]
+
+    cell_h = max(28, min(50, 600 // max(len(p1_vals), 1)))
+    height = cell_h * len(p1_vals) + 140
+
+    fig = go.Figure(go.Heatmap(
+        z=sar_pct,
+        x=x_labels,
+        y=y_labels,
+        colorscale="RdYlGn",
+        zmin=0, zmax=100,
+        colorbar=dict(
+            title=dict(text="TP Rate %", side="right"),
+            ticksuffix="%",
+        ),
+        hovertemplate="%{customdata}<extra></extra>",
+        customdata=hover,
+    ))
+
+    fig.update_layout(
+        title=dict(
+            text=(
+                f"<b>{rf_name}</b> — 2D Sweep<br>"
+                f"<sup>Y: {p1_label} &nbsp;|&nbsp; X: {p2_label} &nbsp;|&nbsp; "
+                f"Color: TP rate % (green=high) &nbsp;|&nbsp; Hover: TP/FP/FN/TN matrix &nbsp;|&nbsp; "
+                f"<b>NOW</b> = current condition</sup>"
+            ),
+            font=dict(size=13),
+        ),
+        xaxis=dict(title=p2_label, tickangle=-35, type="category"),
+        yaxis=dict(title=p1_label, type="category"),
+        height=height,
+        margin=dict(l=10, r=20, t=90, b=60),
+        annotations=annotations,
+    )
+    return fig

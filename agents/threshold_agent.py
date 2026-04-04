@@ -70,6 +70,97 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "rule_2d_sweep",
+            "description": (
+                "2D grid sweep: vary two condition parameters simultaneously for an AML rule "
+                "and produce a heatmap showing SAR catch rate and FP count at each combination. "
+                "Use this when the user asks how two parameters interact, wants a grid or heatmap, "
+                "or wants to optimize two thresholds at once."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "risk_factor": {
+                        "type": "string",
+                        "description": "Rule name (e.g. 'Activity Deviation (ACH)', 'Activity Deviation (Check)', 'Elder Abuse', 'Velocity Single', 'Detect Excessive').",
+                    },
+                    "sweep_param_1": {
+                        "type": "string",
+                        "description": (
+                            "First parameter to sweep. "
+                            "Activity Deviation (ACH): floor_amount or z_threshold. "
+                            "Activity Deviation (Check): floor_amount or z_threshold. "
+                            "Elder Abuse: floor_amount, z_threshold, or age_threshold. "
+                            "Velocity Single: pair_total or ratio_tolerance. "
+                            "Detect Excessive: floor_amount or time_window. "
+                            "Omit to use rule default."
+                        ),
+                    },
+                    "sweep_param_2": {
+                        "type": "string",
+                        "description": "Second parameter to sweep (must differ from sweep_param_1). Omit to use rule default.",
+                    },
+                },
+                "required": ["risk_factor"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_rules",
+            "description": (
+                "List all available AML detection rules (by short code) with their SAR count, "
+                "false positive count, and precision. Call this first when the user asks about "
+                "rule-level SAR analysis, rule performance, which rules generate the most FPs, "
+                "or before calling rule_sar_backtest if the user hasn't specified a rule code."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rule_sar_backtest",
+            "description": (
+                "For a specific AML detection rule, sweep a customer profile threshold and show "
+                "how many SAR customers are caught vs. missed and how many false positives remain "
+                "at each threshold level. Use this when the user asks about a specific rule's "
+                "SAR performance, rule-level FP/FN analysis, or wants to see if a profile filter "
+                "can reduce FPs for a particular rule. Call list_rules first if you don't know "
+                "the rule code."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "risk_factor": {
+                        "type": "string",
+                        "description": (
+                            "Risk factor / rule name to analyze "
+                            "(e.g. 'Activity Deviation', 'Elder Abuse', 'Velocity Single', "
+                            "'Detect Excessive'). Use list_rules to see all available rules."
+                        ),
+                    },
+                    "sweep_param": {
+                        "type": "string",
+                        "description": (
+                            "Which condition parameter to sweep. "
+                            "Activity Deviation (ACH): floor_amount or z_threshold. "
+                            "Activity Deviation (Check): floor_amount or z_threshold. "
+                            "Elder Abuse: floor_amount, z_threshold, or age_threshold. "
+                            "Velocity Single: pair_total. "
+                            "Detect Excessive: floor_amount. "
+                            "Omit to use each rule's default."
+                        ),
+                    },
+                },
+                "required": ["risk_factor"],
+            },
+        },
+    },
 ]
 
 SYSTEM_PROMPT = """\
@@ -78,11 +169,15 @@ false negative (FN) trade-offs as AML alert thresholds change. \
 IMPORTANT: You MUST respond entirely in English. Do NOT use any Chinese or other non-English characters.
 
 DEFINITIONS (always apply these exactly — do not contradict them):
-- False Positive (FP): an alert that fires on a non-suspicious transaction. HIGHER threshold → FEWER FPs.
-- False Negative (FN): a suspicious transaction that did NOT trigger an alert. HIGHER threshold → MORE FNs.
+- TP (True Positive): SAR customer who IS alerted — correctly caught suspicious activity.
+- FP (False Positive): Non-SAR customer who IS alerted — unnecessary investigation. HIGHER threshold → FEWER FPs.
+- FN (False Negative): SAR customer who is NOT alerted — missed suspicious activity. HIGHER threshold → MORE FNs.
+- TN (True Negative): Non-SAR customer who is NOT alerted — correctly silent.
+- TP rate: TP / (TP + FN) — share of SAR customers caught. Also called recall or sensitivity.
+- Precision: TP / (TP + FP) — share of alerts that are genuine SARs.
 - Crossover: the threshold where FP and FN counts are closest — the optimal operating point.
-- Raising the threshold reduces investigator workload (fewer alerts) but risks missing SAR-worthy activity.
-- Lowering the threshold catches more suspicious activity but overwhelms investigators with false alarms.
+- Raising the threshold reduces investigator workload (fewer alerts, fewer FPs) but increases FNs (missed SARs).
+- Lowering the threshold catches more SARs (fewer FNs) but generates more FPs.
 
 RULES — follow these exactly:
 1. ALWAYS call a tool. Never answer threshold or alert questions from memory.
@@ -98,7 +193,11 @@ RULES — follow these exactly:
 11. Do NOT include JSON or code blocks in your final reply.
 12. Call the tool ONCE only. After receiving the tool result, write your final response immediately.
 13. Do NOT compute, derive, or extrapolate any numbers not explicitly stated in the PRE-COMPUTED section. No rates, averages, differences, or trends. If a number is not in the PRE-COMPUTED section, do not mention it.
-14. If the user provides invalid parameters such as threshold_min, threshold_max, threshold_step, step, or min_threshold — do NOT call the tool. Reject the request and state that the only valid parameters are segment (Business or Individual) and threshold_column (AVG_TRXNS_WEEK, AVG_TRXN_AMT, or TRXN_AMT_MONTHLY). Ask the user to specify one of these instead.\
+14. If the user provides invalid parameters such as threshold_min, threshold_max, threshold_step, step, or min_threshold — do NOT call the tool. Reject the request and state that the only valid parameters are segment (Business or Individual) and threshold_column (AVG_TRXNS_WEEK, AVG_TRXN_AMT, or TRXN_AMT_MONTHLY). Ask the user to specify one of these instead.
+15. For any question about a specific AML rule's SAR performance, rule-level FP/FN analysis, or what happens to FP/FN if a rule condition parameter changes — call rule_sar_backtest with risk_factor (e.g. "Activity Deviation (ACH)", "Activity Deviation (Check)", "Elder Abuse", "Velocity Single", "Detect Excessive") and optionally sweep_param (floor_amount, z_threshold, age_threshold, pair_total, ratio_tolerance, time_window). If the user has not specified a rule, call list_rules first.
+16. For any question about which rules exist, which rules generate the most FPs, or a rule performance overview — call list_rules.
+17. For any question about how TWO condition parameters interact, a 2D analysis, optimizing two thresholds simultaneously, or a grid/heatmap of FP vs SAR — call rule_2d_sweep with risk_factor and optionally sweep_param_1 and sweep_param_2.
+18. Do NOT describe UI interactions, chart features, or actions the user can take in the interface (e.g. "hover to see", "right-click to select", "click the cell"). The PRE-COMPUTED section already says the heatmap is in the chart. Say nothing else about the chart.\
 """
 
 

@@ -34,6 +34,18 @@ Key distinction:
 - "What threshold catches 90% of SARs?" → threshold
 - "SAR catch rate for Business monthly transaction amount" → threshold
 - "Run SAR backtest" → threshold
+- "Show me a 2D grid for Activity Deviation ACH" → threshold  (2D sweep is a threshold tool)
+- "How do floor amount and sigma interact for Activity Deviation?" → threshold
+- "Show me the ACH deviation rule performance" → threshold
+- "What is the SAR catch rate for Activity Deviation Check?" → threshold
+- "Show the heatmap for Elder Abuse" → threshold
+- "2D analysis for Velocity Single" → threshold
+- "How does time window interact with floor amount for Detect Excessive?" → threshold
+- "Show me the AML rule performance overview" → threshold  (list_rules is a threshold tool)
+- "Which rules generate the most false positives?" → threshold
+- "What is the SAR catch rate for the Activity Deviation rule?" → threshold
+- "Show rule-level FP analysis" → threshold
+- "What happens to FP if I raise the age threshold for Elder Abuse?" → threshold
 - "How do banks manage alert volumes?" → policy  (general knowledge question)
 - "What is AML?" → policy  (general knowledge question)
 - "Cluster all customers" → segmentation  (run local analysis)

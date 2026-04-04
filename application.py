@@ -29,6 +29,8 @@ from dash_chat import ChatComponent
 from config import ALERTS_CSV, SS_CSV, SAR_CSV, OLLAMA_MODEL, OLLAMA_BASE_URL
 from agents import OrchestratorAgent
 import lambda_ss_performance
+import lambda_rule_analysis
+import make_figures
 
 MAX_SWEEP_ROWS = 10  # max sweep points passed to model (prevents token limit cutoff)
 
@@ -65,6 +67,14 @@ print(f"Alerts data: {_total:,} rows | Business={_biz_count:,} Individual={_ind_
 print(f"SS data: {'loaded (' + str(len(DF_SS)) + ' rows)' if DF_SS is not None else 'not found — run python ss_data_prep.py'}")
 _sar_status = (f"loaded ({len(DF_SAR)} rows, {int(DF_SAR['is_sar'].sum())} SARs)" if DF_SAR is not None else "not found - run python simulate_sars.py")
 print(f"SAR simulation: {_sar_status}")
+
+DF_RULE_SWEEP = lambda_rule_analysis.load_rule_sweep_data()
+_rule_status = (
+    f"loaded ({len(DF_RULE_SWEEP)} rows, {DF_RULE_SWEEP['risk_factor'].nunique()} rules)"
+    if DF_RULE_SWEEP is not None
+    else "not found — run python prepare_rule_sweep_data.py"
+)
+print(f"Rule sweep data: {_rule_status}")
 
 COL_MAP = {
     "AVG_TRXNS_WEEK":   "avg_num_trxns",
@@ -116,9 +126,18 @@ def compute_threshold_stats(df_seg, threshold):
     The model is instructed to copy the PRE-COMPUTED ANALYSIS verbatim and only
     add one AML insight sentence — this eliminates hallucinated numbers.
     """
-    t_min = df_seg[threshold].min()
-    t_max = df_seg[threshold].max()
-    step  = max(1, int((t_max - t_min) / 100))
+    import math as _math
+    cur_val = df_seg[threshold].median()   # use median as operational center
+    raw_step = cur_val / 4
+    mag = 10 ** _math.floor(_math.log10(max(raw_step, 1)))
+    n = raw_step / mag
+    if n < 1.5:   nice = 1
+    elif n < 3.5: nice = 2
+    elif n < 7.5: nice = 5
+    else:         nice = 10
+    step  = int(nice * mag)
+    t_min = max(step, int(cur_val - 4 * step))
+    t_max = int(cur_val + 4 * step)
 
     sweep = []
     t = t_min
@@ -136,7 +155,7 @@ def compute_threshold_stats(df_seg, threshold):
 
     fn_first_nonzero = next(((t, fn) for t, fp, fn in sweep if fn > 0), None)
     fp_first_zero    = next(((t, fp) for t, fp, fn in sweep if fp == 0), None)
-    fn_zero_end      = round(fn_first_nonzero[0] - step, 2) if fn_first_nonzero else t_max
+    fn_zero_end      = max(t_min, round(fn_first_nonzero[0] - step, 2)) if fn_first_nonzero else t_max
 
     crossover = min(sweep, key=lambda x: abs(x[1] - x[2]))
 
@@ -160,9 +179,15 @@ def compute_threshold_stats(df_seg, threshold):
 
     # FN behaviour
     if fn_first_nonzero:
-        lines.append(
-            f"False negatives are zero for all thresholds from {t_min} up to and including {fn_zero_end}."
-        )
+        if fn_zero_end > t_min:
+            lines.append(
+                f"False negatives are zero for all thresholds from {t_min} up to and including {fn_zero_end}."
+            )
+        else:
+            lines.append(
+                f"False negatives are already non-zero at the lowest sweep threshold ({t_min}), "
+                f"meaning some customers fall below the sweep floor."
+            )
         lines.append(
             f"False negatives first become non-zero at threshold {fn_first_nonzero[0]} (FN={fn_first_nonzero[1]})."
         )
@@ -191,12 +216,7 @@ def compute_threshold_stats(df_seg, threshold):
         )
 
     lines.append("=== END PRE-COMPUTED ANALYSIS ===")
-    lines.append("")
-    shown = sweep[:MAX_SWEEP_ROWS]
-    lines.append(f"Raw sweep (threshold range {round(t_min,2)}–{round(t_max,2)}, step={step}, showing first {len(shown)} of {len(sweep)} points):")
-    lines += [f"  t={t}: FP={fp}, FN={fn}" for t, fp, fn in shown]
-    if len(sweep) > MAX_SWEEP_ROWS:
-        lines.append(f"  ... ({len(sweep) - MAX_SWEEP_ROWS} additional points not shown)")
+    lines.append("(Detailed sweep table shown in the chart below.)")
 
     return "\n".join(lines)
 
@@ -287,12 +307,7 @@ def compute_sar_backtest(df_sar_seg, sar_col, segment_name):
 
     lines.append(f"At the highest threshold ({sweep[-1][0]}): {sweep[-1][1]} SARs caught, {sweep[-1][2]} missed (100.0% missed).")
     lines.append("=== END PRE-COMPUTED SAR BACKTEST ===")
-    lines.append("")
-    shown = sweep[:MAX_SWEEP_ROWS]
-    lines.append(f"Raw sweep (range {round(t_min,2)}--{round(t_max,2)}, step={step}, showing first {len(shown)} of {len(sweep)} points):")
-    lines += [f"  t={t}: caught={c}, missed={m} ({round(100*c/total_sars,1)}% catch rate)" for t, c, m in shown]
-    if len(sweep) > MAX_SWEEP_ROWS:
-        lines.append(f"  ... ({len(sweep) - MAX_SWEEP_ROWS} additional points not shown)")
+    lines.append("(Detailed sweep table shown in the chart below.)")
 
     return "\n".join(lines)
 
@@ -310,24 +325,53 @@ def tool_executor(tool_name, tool_input):
         col     = COL_MAP.get(tool_input.get("threshold_column", "AVG_TRXNS_WEEK"), "avg_num_trxns")
         df_seg  = DF_BUSINESS if segment == "Business" else DF_INDIVIDUAL
         stats   = compute_threshold_stats(df_seg, col)
-        fig, _  = lambda_ss_performance.plot_thresholds_tuning(df_seg, col, 0.1, segment)
-        return stats, fig
+        line_fig, _ = lambda_ss_performance.plot_thresholds_tuning(df_seg, col, 0.1, segment)
+        tbl_fig = make_figures.threshold_tuning_figure(df_seg, col, segment)
+        return stats, (line_fig, tbl_fig)
 
     elif tool_name == "segment_stats":
-        return compute_segment_stats(DF), None
+        tbl_fig = make_figures.segment_stats_figure(DF)
+        return compute_segment_stats(DF), tbl_fig
 
     elif tool_name == "sar_backtest":
         if DF_SAR is None:
             return "SAR simulation data not found. Run python simulate_sars.py first.", None
-        segment = tool_input.get("segment", "Business")
-        col     = SAR_COL_MAP.get(tool_input.get("threshold_column", "TRXN_AMT_MONTHLY"), "trxn_amt_monthly")
+        segment    = tool_input.get("segment", "Business")
+        col        = SAR_COL_MAP.get(tool_input.get("threshold_column", "TRXN_AMT_MONTHLY"), "trxn_amt_monthly")
         df_sar_seg = DF_SAR_BUSINESS if segment == "Business" else DF_SAR_INDIVIDUAL
-        stats = compute_sar_backtest(df_sar_seg, col, segment)
-        return stats, None
+        stats      = compute_sar_backtest(df_sar_seg, col, segment)
+        tbl_fig    = make_figures.sar_backtest_figure(df_sar_seg, col, segment)
+        return stats, tbl_fig
+
+    elif tool_name == "rule_2d_sweep":
+        if DF_RULE_SWEEP is None:
+            return "Rule sweep data not found. Run python prepare_rule_sweep_data.py first.", None
+        risk_factor = tool_input.get("risk_factor", "")
+        param1      = tool_input.get("sweep_param_1") or None
+        param2      = tool_input.get("sweep_param_2") or None
+        text, grid  = lambda_rule_analysis.compute_rule_2d_sweep(DF_RULE_SWEEP, risk_factor, param1, param2)
+        heatmap     = make_figures.rule_2d_heatmap(grid) if grid else None
+        return text, heatmap
+
+    elif tool_name == "list_rules":
+        if DF_RULE_SWEEP is None:
+            return "Rule sweep data not found. Run python prepare_rule_sweep_data.py first.", None
+        tbl_fig = make_figures.rule_list_figure(DF_RULE_SWEEP)
+        return lambda_rule_analysis.list_rules_text(DF_RULE_SWEEP), tbl_fig
+
+    elif tool_name == "rule_sar_backtest":
+        if DF_RULE_SWEEP is None:
+            return "Rule sweep data not found. Run python prepare_rule_sweep_data.py first.", None
+        risk_factor = tool_input.get("risk_factor", tool_input.get("rule_code", ""))
+        sweep_param = tool_input.get("sweep_param", None)
+        stats   = lambda_rule_analysis.compute_rule_sar_sweep(DF_RULE_SWEEP, risk_factor, sweep_param)
+        tbl_fig = make_figures.rule_sweep_figure(DF_RULE_SWEEP, risk_factor, sweep_param)
+        return stats, tbl_fig
 
     elif tool_name == "alerts_distribution":
-        fig = lambda_ss_performance.alerts_distribution(DF)
-        return compute_segment_stats(DF), fig
+        bar_fig = lambda_ss_performance.alerts_distribution(DF)
+        tbl_fig = make_figures.segment_stats_figure(DF)
+        return compute_segment_stats(DF), (bar_fig, tbl_fig)
 
     elif tool_name == "cluster_analysis":
         customer_type = tool_input.get("customer_type", "All")
@@ -433,12 +477,49 @@ def _chart_content(tool_name, tool_input, fig):
     if tool_name == "threshold_tuning":
         seg = tool_input.get("segment", "")
         col = tool_input.get("threshold_column", "")
-        figs   = [fig]
-        labels = [f"Threshold Tuning — {seg} / {col}"]
+        figs   = list(fig) if isinstance(fig, tuple) else [fig]
+        labels = [f"Threshold Tuning — {seg} / {col}", f"Threshold Table — {seg} / {col}"][:len(figs)]
 
     elif tool_name == "alerts_distribution":
+        figs   = list(fig) if isinstance(fig, tuple) else [fig]
+        labels = ["Alerts & False Positives by Segment", "Segment Statistics Table"][:len(figs)]
+
+    elif tool_name == "segment_stats":
         figs   = [fig]
-        labels = ["Alerts & False Positives by Segment"]
+        labels = ["Segment Statistics"]
+
+    elif tool_name == "sar_backtest":
+        seg = tool_input.get("segment", "")
+        col = tool_input.get("threshold_column", "")
+        figs   = [fig]
+        labels = [f"SAR Backtest — {seg} / {col}"]
+
+    elif tool_name == "list_rules":
+        figs   = [fig]
+        labels = ["AML Rule Performance Overview"]
+
+    elif tool_name == "rule_2d_sweep":
+        from lambda_rule_analysis import RULE_CATALOGUE, _match_rule
+        rf = tool_input.get("risk_factor", "")
+        p1 = tool_input.get("sweep_param_1") or None
+        p2 = tool_input.get("sweep_param_2") or None
+        _, entry = _match_rule(rf)
+        if entry and (p1 is None or p2 is None):
+            d1, d2 = entry.get("default_2d", (None, None))
+            if p1 is None: p1 = d1
+            if p2 is None: p2 = d2
+        figs   = [fig]
+        labels = [f"2D Sweep — {rf} ({p1 or '?'} x {p2 or '?'})"]
+
+    elif tool_name == "rule_sar_backtest":
+        from lambda_rule_analysis import RULE_CATALOGUE, _match_rule
+        rf  = tool_input.get("risk_factor", tool_input.get("rule_code", ""))
+        sp  = tool_input.get("sweep_param") or None
+        _, entry = _match_rule(rf)
+        if sp is None and entry:
+            sp = entry["default_sweep"]
+        figs   = [fig]
+        labels = [f"Rule SAR Sweep — {rf} / {sp or 'default'}"]
 
     elif tool_name in ("cluster_analysis", "ss_cluster_analysis"):
         ct     = tool_input.get("customer_type", "All")
@@ -455,13 +536,14 @@ def _chart_content(tool_name, tool_input, fig):
         labels = [tool_name] * len(figs)
 
     for label, f in zip(labels, figs):
+        fig_h = f.layout.height if f.layout.height else 460
         blocks.append({"type": "text", "text": f"**{label}**"})
         blocks.append({
             "type": "graph",
             "props": {
                 "figure": f.to_dict(),
                 "config": {"responsive": True},
-                "style":  {"height": "460px"},
+                "style":  {"height": f"{fig_h}px", "width": "100%"},
             },
         })
     return blocks
@@ -528,7 +610,7 @@ _chat_panel = html.Div([
         messages=[],
         class_name="FRAML AI",
     )
-], style={
+], id="chat-scroll-container", style={
     "height": "calc(100vh - 80px)",
     "overflow": "auto",
     "overscrollBehaviorY": "contain",
@@ -550,10 +632,27 @@ app.layout = dbc.Container([
 
     # Store for pending prompt from sidebar buttons
     dcc.Store(id="pending-prompt", data=None),
+    dcc.Store(id="scroll-dummy"),
     # One-shot interval to inject welcome message after page load
     dcc.Interval(id="welcome-interval", interval=300, max_intervals=1),
 ], fluid=True, style={"height": "100vh", "overflow": "hidden"})
 
+
+# ── Auto-scroll chat to bottom whenever messages update ───────────────────────
+app.clientside_callback(
+    """
+    function(messages) {
+        setTimeout(function() {
+            var el = document.getElementById('chat-scroll-container');
+            if (el) { el.scrollTop = el.scrollHeight; }
+        }, 150);
+        return null;
+    }
+    """,
+    Output("scroll-dummy", "data"),
+    Input("chat-component", "messages"),
+    prevent_initial_call=True,
+)
 
 # ── Callbacks ─────────────────────────────────────────────────────────────────
 
