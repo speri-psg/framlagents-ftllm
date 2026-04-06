@@ -97,6 +97,24 @@ def main():
         except Exception as e:
             print(f"  ERROR reading {fname}: {e}")
 
+    # Ingest plain text files from docs/
+    txt_files = glob.glob(os.path.join(DOCS_FOLDER, "*.txt"))
+    for txt_path in txt_files:
+        fname = os.path.basename(txt_path)
+        print(f"Ingesting text file: {fname} ...")
+        try:
+            with open(txt_path, encoding="utf-8") as f:
+                full_text = f.read()
+            chunks = chunk_text(full_text)
+            for chunk in chunks:
+                all_chunks.append(chunk)
+                all_ids.append(f"chunk_{chunk_id}")
+                all_metadata.append({"source": fname, "type": "txt"})
+                chunk_id += 1
+            print(f"  -> {len(chunks)} chunks")
+        except Exception as e:
+            print(f"  ERROR reading {fname}: {e}")
+
     # Ingest Word docs from docs/
     docx_files = glob.glob(os.path.join(DOCS_FOLDER, "*.docx"))
     for docx_path in docx_files:
