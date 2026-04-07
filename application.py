@@ -766,6 +766,12 @@ def handle_chat(new_message, pending_prompt, messages):
     agent_text = re.sub(r'===\s*END PRE-COMPUTED SEGMENT STATS\s*===\n?', '', agent_text).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED SAR BACKTEST.*?===\n?', '', agent_text).strip()
     agent_text = re.sub(r'===\s*END PRE-COMPUTED SAR BACKTEST\s*===\n?', '', agent_text).strip()
+    agent_text = re.sub(r'===.*?PRE-COMPUTED RULE SWEEP.*?===\n?', '', agent_text).strip()
+    agent_text = re.sub(r'===\s*END RULE SWEEP\s*===\n?', '', agent_text).strip()
+    agent_text = re.sub(r'===.*?PRE-COMPUTED RULE LIST.*?===\n?', '', agent_text).strip()
+    agent_text = re.sub(r'===\s*END RULE LIST\s*===\n?', '', agent_text).strip()
+    agent_text = re.sub(r'===.*?PRE-COMPUTED 2D SWEEP.*?===\n?', '', agent_text).strip()
+    agent_text = re.sub(r'===\s*END 2D SWEEP\s*===\n?', '', agent_text).strip()
 
     if chart_results:
         content = [{"type": "text", "text": agent_text}] if agent_text else []

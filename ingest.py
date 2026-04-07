@@ -12,8 +12,18 @@ import glob
 
 DOCS_FOLDER = "docs"
 CHROMA_PATH = "chroma_db"
-CHUNK_SIZE = 500    # words per chunk
-CHUNK_OVERLAP = 50  # words overlap between chunks
+CHUNK_SIZE = 150    # words per chunk — all-MiniLM-L6-v2 max is 256 tokens (~180 words)
+CHUNK_OVERLAP = 20  # words overlap between chunks
+
+
+_FRENCH_MARKERS = ("l'Agence", "la criminalité", "du financement", "les activités terroristes",
+                   "Recyclage des produits", "le blanchiment", "conformément", "paragraphe")
+
+
+def _is_mostly_french(text: str) -> bool:
+    """Return True if chunk appears to be French (bilingual PDF noise)."""
+    hits = sum(1 for m in _FRENCH_MARKERS if m in text)
+    return hits >= 2
 
 
 def chunk_text(text, size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
@@ -21,7 +31,7 @@ def chunk_text(text, size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
     chunks = []
     for i in range(0, len(words), size - overlap):
         chunk = " ".join(words[i:i + size])
-        if chunk.strip():
+        if chunk.strip() and not _is_mostly_french(chunk):
             chunks.append(chunk)
     return chunks
 

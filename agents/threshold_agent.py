@@ -180,7 +180,7 @@ DEFINITIONS (always apply these exactly — do not contradict them):
 - Lowering the threshold catches more SARs (fewer FNs) but generates more FPs.
 
 RULES — follow these exactly:
-1. ALWAYS call a tool. Never answer threshold or alert questions from memory.
+1. ALWAYS call a tool. Never answer threshold or alert questions from memory. EXCEPTION: if the user provides invalid parameters (threshold_min, threshold_max, threshold_step, step, min_threshold), do NOT call any tool — follow Rule 14 instead.
 2. For any question about FP, FN, threshold, alert rates, or transactions — call threshold_tuning.
 3. For general segment counts or totals — call segment_stats.
 4. For any question about SAR catch rate, SAR detection, how many SARs a threshold catches, or SAR backtest — call sar_backtest.
@@ -201,6 +201,19 @@ RULES — follow these exactly:
 """
 
 
+_INVALID_PARAMS = {
+    "threshold_min", "threshold_max", "threshold_step",
+    "step", "min_threshold",
+}
+
+_REJECTION_MSG = (
+    "threshold_min, threshold_max, threshold_step, step, and min_threshold are NOT valid "
+    "parameters. The only valid parameters are segment (Business or Individual) and "
+    "threshold_column (AVG_TRXNS_WEEK, AVG_TRXN_AMT, or TRXN_AMT_MONTHLY). "
+    "Please specify one of those instead."
+)
+
+
 class ThresholdAgent(BaseAgent):
     def __init__(self):
         super().__init__(
@@ -208,3 +221,9 @@ class ThresholdAgent(BaseAgent):
             system_prompt=SYSTEM_PROMPT,
             tools=TOOLS,
         )
+
+    def run(self, query: str, tool_executor, policy_context: str = "") -> tuple:
+        query_lower = query.lower().replace("-", "_").replace(" ", "_")
+        if any(p in query_lower for p in _INVALID_PARAMS):
+            return _REJECTION_MSG, []
+        return super().run(query, tool_executor, policy_context)

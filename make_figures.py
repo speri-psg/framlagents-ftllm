@@ -22,6 +22,12 @@ def _alternating_fill(n, odd=_ROW_FILL_ODD, even=_ROW_FILL_EVEN):
     return [odd if i % 2 == 0 else even for i in range(n)]
 
 
+def _table_height(n_rows, row_h=28, header_h=32, max_rows=10, margin=70):
+    """Return figure height sized to actual rows, capped at max_rows (Plotly scrolls beyond that)."""
+    visible = min(n_rows, max_rows)
+    return header_h + visible * row_h + margin
+
+
 # ── 1. list_rules ─────────────────────────────────────────────────────────────
 
 def rule_list_figure(df_rule_sweep):
@@ -63,6 +69,7 @@ def rule_list_figure(df_rule_sweep):
     fig.update_layout(
         title="AML Rule Performance Overview",
         margin=dict(l=10, r=10, t=40, b=10),
+        height=_table_height(n, row_h=28),
     )
     return fig
 
@@ -79,8 +86,9 @@ def rule_sweep_figure(df_rule_sweep, risk_factor_keyword, sweep_param=None):
 
     if sweep_param is None or sweep_param not in entry["sweep_params"]:
         sweep_param = entry["default_sweep"]
-    sp  = entry["sweep_params"][sweep_param]
-    col = sp["col"]
+    sp           = entry["sweep_params"][sweep_param]
+    col          = sp["col"]
+    integer_axis = sp.get("integer_axis", False)
 
     rule_df = df_rule_sweep[df_rule_sweep["risk_factor"] == rf_name].copy()
     known   = rule_df.dropna(subset=["is_sar", col]).copy()
@@ -177,6 +185,7 @@ def rule_sweep_figure(df_rule_sweep, risk_factor_keyword, sweep_param=None):
     fig.update_layout(
         title=f"{rf_name} — {sweep_param} sweep (* = current condition value)",
         margin=dict(l=10, r=10, t=40, b=10),
+        height=_table_height(n, row_h=26),
     )
     return fig
 
@@ -254,6 +263,7 @@ def threshold_tuning_figure(df_seg, threshold_col, segment_name):
     fig.update_layout(
         title=f"Threshold Tuning — {segment_name} / {threshold_col}",
         margin=dict(l=10, r=10, t=40, b=10),
+        height=_table_height(n, row_h=26),
     )
     return fig
 
@@ -318,6 +328,7 @@ def sar_backtest_figure(df_sar_seg, sar_col, segment_name):
     fig.update_layout(
         title=f"SAR Backtest — {segment_name} / {sar_col}",
         margin=dict(l=10, r=10, t=40, b=10),
+        height=_table_height(n, row_h=26),
     )
     return fig
 
@@ -359,9 +370,11 @@ def segment_stats_figure(df):
             height=28,
         ),
     ))
+    n_seg = len(rows)
     fig.update_layout(
         title="Segment Statistics — Alerts, FP, FN",
         margin=dict(l=10, r=10, t=40, b=10),
+        height=_table_height(n_seg, row_h=28),
     )
     return fig
 
@@ -409,6 +422,8 @@ def rule_2d_heatmap(grid_dict):
 
     x_labels = [fmt(v, p2_fmt_pct) for v in p2_vals]
     y_labels = [fmt(v, p1_fmt_pct) for v in p1_vals]
+    x_idx = list(range(len(p2_vals)))
+    y_idx = list(range(len(p1_vals)))
 
     # Hover: axis coordinates + 2x2 confusion matrix (TP/FP/FN/TN)
     # TP = alerted SAR  (green)   FP = alerted non-SAR  (red)
@@ -459,8 +474,8 @@ def rule_2d_heatmap(grid_dict):
 
     fig = go.Figure(go.Heatmap(
         z=sar_pct,
-        x=x_labels,
-        y=y_labels,
+        x=x_idx,
+        y=y_idx,
         colorscale="RdYlGn",
         zmin=0, zmax=100,
         colorbar=dict(
@@ -481,8 +496,10 @@ def rule_2d_heatmap(grid_dict):
             ),
             font=dict(size=13),
         ),
-        xaxis=dict(title=p2_label, tickangle=-35, type="category"),
-        yaxis=dict(title=p1_label, type="category"),
+        xaxis=dict(title=p2_label, tickangle=-35, tickmode="array",
+                   tickvals=x_idx, ticktext=x_labels),
+        yaxis=dict(title=p1_label, tickmode="array",
+                   tickvals=y_idx, ticktext=y_labels),
         height=height,
         margin=dict(l=10, r=20, t=90, b=60),
         annotations=annotations,

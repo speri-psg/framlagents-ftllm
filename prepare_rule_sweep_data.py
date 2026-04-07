@@ -204,14 +204,14 @@ results.append(act_df)
 
 print("Computing Elder Abuse metrics …")
 
-# trigger_amt = max outgoing transaction amount from the triggering transactions
 # trigger_date = date of the latest triggering transaction
+# trigger_amt = 14-day aggregate outgoing ending on trigger_date (the actual rule metric)
 elder_cd = cd[cd["Risk Factors"] == "Elder Abuse"].copy()
 
 elder_trigger = (
     elder_cd.sort_values("timestamp")
     .groupby("customer_id")
-    .agg(trigger_amt=("amount", "max"), trigger_date=("timestamp", "last"))
+    .agg(trigger_date=("timestamp", "last"))
     .reset_index()
 )
 
@@ -222,40 +222,56 @@ cust_age["age"] = ((REF_DATE - cust_age["birthdate"]).dt.days / 365.25).round(1)
 
 elder_trigger = elder_trigger.merge(cust_age[["customer_id", "age"]], on="customer_id", how="left")
 
+
 # 2c. 90-day preceding rolling 14-day outgoing sums
 #     For each customer, compute 14-day rolling outgoing totals across the 90 days
 #     before the trigger date, then take mean and std of those totals.
 
 def _elder_profile(cust_id, trigger_date):
-    window_end   = trigger_date - pd.Timedelta(days=1)
-    window_start = window_end   - pd.Timedelta(days=90)
+    """Return (trigger_14d_sum, profile_mean, profile_std).
 
-    cust_txns = txns[
+    trigger_14d_sum: 14-day aggregate outgoing ending on trigger_date (the value
+                     the rule actually evaluated against the $5K floor and z threshold).
+    profile_mean/std: from 14-day rolling sums over the 90-day preceding window.
+    """
+    # 14-day window ending on trigger_date (inclusive)
+    trigger_window_start = trigger_date - pd.Timedelta(days=13)
+    trigger_txns = txns[
         (txns["customer_id"] == cust_id) &
         (txns["cash_direction"] == "CashOut") &
-        (txns["timestamp"] >= window_start) &
-        (txns["timestamp"] <= window_end)
+        (txns["timestamp"] >= trigger_window_start) &
+        (txns["timestamp"] <= trigger_date)
+    ]
+    trigger_14d_sum = float(trigger_txns["amount"].sum())
+
+    # 90-day profile window preceding the trigger window
+    profile_end   = trigger_window_start - pd.Timedelta(days=1)
+    profile_start = profile_end - pd.Timedelta(days=90)
+    profile_txns = txns[
+        (txns["customer_id"] == cust_id) &
+        (txns["cash_direction"] == "CashOut") &
+        (txns["timestamp"] >= profile_start) &
+        (txns["timestamp"] <= profile_end)
     ][["timestamp", "amount"]].sort_values("timestamp")
 
-    if cust_txns.empty:
-        return 0.0, 0.0
+    if profile_txns.empty:
+        return trigger_14d_sum, 0.0, 0.0
 
-    # Compute 14-day rolling sums by day
-    cust_txns = cust_txns.set_index("timestamp")
-    daily = cust_txns["amount"].resample("D").sum().fillna(0)
+    profile_txns = profile_txns.set_index("timestamp")
+    daily = profile_txns["amount"].resample("D").sum().fillna(0)
     rolling_14d = daily.rolling(14, min_periods=1).sum()
     mean = float(rolling_14d.mean())
     std  = float(rolling_14d.std(ddof=1)) if len(rolling_14d) > 1 else 0.0
-    return mean, std
+    return trigger_14d_sum, mean, std
 
 elder_rows = []
 for _, row in elder_trigger.iterrows():
-    mean, std = _elder_profile(row["customer_id"], row["trigger_date"])
-    z = (row["trigger_amt"] - mean) / std if std > 0 else np.nan
+    trigger_14d, mean, std = _elder_profile(row["customer_id"], row["trigger_date"])
+    z = (trigger_14d - mean) / std if std > 0 else np.nan
     elder_rows.append({
         "customer_id":     row["customer_id"],
         "risk_factor":     "Elder Abuse",
-        "trigger_amt":     round(row["trigger_amt"], 2),
+        "trigger_amt":     round(trigger_14d, 2),
         "age":             row["age"] if not pd.isna(row["age"]) else np.nan,
         "profile_mean":    round(mean, 2),
         "profile_std":     round(std, 2),
@@ -352,13 +368,14 @@ det_cd = cd[cd["Risk Factors"] == "Detect Excessive Transaction Activity"].copy(
 det_trigger = (
     det_cd.sort_values("timestamp")
     .groupby("customer_id")
-    .agg(trigger_amt=("amount", "max"), trigger_date=("timestamp", "last"))
+    .agg(trigger_date=("timestamp", "last"))
     .reset_index()
 )
 
 # Compute max rolling N-day Cash + Check CashIn sum for each customer
 # across multiple time windows, using a window ending on their trigger date.
-WINDOWS = [3, 7, 10, 14]   # 5-day is the current condition (trigger_amt)
+# 5 = current condition window; trigger_amt is set to max_rolling_5d below.
+WINDOWS = [3, 5, 7, 10, 14]
 
 cash_check_in = txns[
     (txns["transaction_type"].isin(["Cash", "Check"])) &
@@ -382,10 +399,14 @@ def _max_rolling_sum(cust_id, trigger_date, window_days):
 
 det_rows = []
 for _, row in det_trigger.iterrows():
-    entry = {"customer_id": row["customer_id"], "risk_factor": "Detect Excessive Transaction Activity",
-             "trigger_amt": round(row["trigger_amt"], 2)}
+    rolling = {w: round(_max_rolling_sum(row["customer_id"], row["trigger_date"], w), 2) for w in WINDOWS}
+    entry = {
+        "customer_id": row["customer_id"],
+        "risk_factor": "Detect Excessive Transaction Activity",
+        "trigger_amt": rolling[5],   # 5-day sum = the actual rule metric
+    }
     for w in WINDOWS:
-        entry[f"max_rolling_{w}d"] = round(_max_rolling_sum(row["customer_id"], row["trigger_date"], w), 2)
+        entry[f"max_rolling_{w}d"] = rolling[w]
     det_rows.append(entry)
 
 det_df = pd.DataFrame(det_rows)

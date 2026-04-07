@@ -54,6 +54,10 @@ Key distinction:
 - "Show alert distribution" → segmentation
 - "How are alerts spread across segments?" → segmentation
 - "Which segment has the most alerts?" → segmentation
+- "What is the average transaction amount for Business customers?" → threshold  (segment_stats tool)
+- "How many alerts does the Individual segment have?" → threshold  (segment_stats tool)
+- "What are the transaction stats for Business customers?" → threshold
+- "Show me Business customer stats" → threshold
 
 Rules:
 - Output ONLY the label(s), comma-separated. No explanation, no punctuation other than commas.

@@ -111,8 +111,8 @@ RULE_CATALOGUE = {
                 "desc":         "Minimum customer age to trigger (currently 60)",
             },
         },
-        "default_sweep": "floor_amount",
-        "default_2d":   ("floor_amount", "z_threshold"),
+        "default_sweep": "z_threshold",
+        "default_2d":   ("z_threshold", "age_threshold"),
     },
     "velocity single": {
         "name":        "Velocity Single",
@@ -575,6 +575,30 @@ def _sweep_points(df, sp, n_steps=15):
         else:
             nice = 10
         return nice * mag
+
+    # If explicit sweep_min AND sweep_max are both given, distribute evenly between them.
+    # Round step UP (not down) so the grid stays compact (~6–9 steps).
+    if "sweep_min" in sp and "sweep_max" in sp:
+        t_min = float(sp["sweep_min"])
+        t_max = float(sp["sweep_max"])
+        target = max(5, min(n_steps, 9))
+        raw_step = (t_max - t_min) / (target - 1)
+        mag = 10 ** math.floor(math.log10(raw_step))
+        n = raw_step / mag
+        if n <= 1.5:
+            nice = 2    # round up from 1×
+        elif n <= 3.5:
+            nice = 5    # round up from 2×
+        elif n <= 7.5:
+            nice = 10   # round up from 5×
+        else:
+            nice = 10
+        step = nice * mag
+        n_pts = int(round((t_max - t_min) / step)) + 1
+        pts = [int(round(t_min + i * step)) for i in range(n_pts)]
+        if int(round(cur)) not in pts and t_min <= cur <= t_max:
+            pts.append(int(round(cur)))
+        return sorted(set(pts))
 
     step = _nice_step(cur)
     hard_min = float(sp.get("sweep_min", step))
