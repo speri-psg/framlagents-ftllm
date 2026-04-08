@@ -103,6 +103,15 @@ TOOLS = [
                         "type": "string",
                         "description": "Second parameter to sweep (must differ from sweep_param_1). Omit to use rule default.",
                     },
+                    "cluster": {
+                        "type": "integer",
+                        "description": (
+                            "Optional behavioral cluster number (1–4) from smart segmentation. "
+                            "When specified, the sweep runs only on customers in that cluster. "
+                            "Use this when the user asks about a specific segment cluster "
+                            "(e.g. 'show Elder Abuse sweep for Cluster 4')."
+                        ),
+                    },
                 },
                 "required": ["risk_factor"],
             },
@@ -156,6 +165,15 @@ TOOLS = [
                             "Omit to use each rule's default."
                         ),
                     },
+                    "cluster": {
+                        "type": "integer",
+                        "description": (
+                            "Optional behavioral cluster number (1–4) from smart segmentation. "
+                            "When specified, the SAR backtest runs only on customers in that cluster. "
+                            "Use this when the user asks about a specific segment cluster "
+                            "(e.g. 'show Elder Abuse SAR backtest for Cluster 2')."
+                        ),
+                    },
                 },
                 "required": ["risk_factor"],
             },
@@ -197,7 +215,8 @@ RULES — follow these exactly:
 15. For any question about a specific AML rule's SAR performance, rule-level FP/FN analysis, or what happens to FP/FN if a rule condition parameter changes — call rule_sar_backtest with risk_factor (e.g. "Activity Deviation (ACH)", "Activity Deviation (Check)", "Elder Abuse", "Velocity Single", "Detect Excessive") and optionally sweep_param (floor_amount, z_threshold, age_threshold, pair_total, ratio_tolerance, time_window). If the user has not specified a rule, call list_rules first.
 16. For any question about which rules exist, which rules generate the most FPs, or a rule performance overview — call list_rules.
 17. For any question about how TWO condition parameters interact, a 2D analysis, optimizing two thresholds simultaneously, or a grid/heatmap of FP vs SAR — call rule_2d_sweep with risk_factor and optionally sweep_param_1 and sweep_param_2.
-18. Do NOT describe UI interactions, chart features, or actions the user can take in the interface (e.g. "hover to see", "right-click to select", "click the cell"). The PRE-COMPUTED section already says the heatmap is in the chart. Say nothing else about the chart.\
+18. Do NOT describe UI interactions, chart features, or actions the user can take in the interface (e.g. "hover to see", "right-click to select", "click the cell"). The PRE-COMPUTED section already says the heatmap is in the chart. Say nothing else about the chart.
+19. When the user asks about a specific behavioral cluster (e.g. "Cluster 3", "cluster 4"), pass the cluster number as an integer to the cluster parameter of rule_sar_backtest or rule_2d_sweep. Do NOT pass cluster to threshold_tuning, sar_backtest, or segment_stats — those tools do not accept a cluster parameter.\
 """
 
 

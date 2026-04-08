@@ -71,6 +71,10 @@ Key distinction:
 - "Which rules generate only false positives?" → threshold
 - "Run a SAR backtest for the structuring rule" → threshold  (rule_sar_backtest — NOT out_of_scope)
 - "SAR backtest for Elder Abuse" → threshold
+- "Show Elder Abuse sweep for Cluster 4" → threshold  (cluster-filtered rule sweep)
+- "Run SAR backtest for Activity Deviation ACH in Cluster 2" → threshold
+- "Show 2D heatmap for Elder Abuse for Cluster 3" → threshold
+- "Which cluster has the most false positives for Velocity Single?" → threshold
 
 Rules:
 - Output ONLY the label(s), comma-separated. No explanation, no punctuation other than commas.

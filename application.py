@@ -26,7 +26,7 @@ import dash_bootstrap_components as dbc
 from dash import Dash, callback, html, dcc, Input, Output, State, callback_context, ALL, no_update
 from dash_chat import ChatComponent
 
-from config import ALERTS_CSV, SS_CSV, SAR_CSV, OLLAMA_MODEL, OLLAMA_BASE_URL
+from config import ALERTS_CSV, SS_CSV, SAR_CSV, CLUSTER_LABELS_CSV, OLLAMA_MODEL, OLLAMA_BASE_URL
 from agents import OrchestratorAgent
 import lambda_ss_performance
 import lambda_rule_analysis
@@ -75,6 +75,13 @@ _rule_status = (
     else "not found — run python prepare_rule_sweep_data.py"
 )
 print(f"Rule sweep data: {_rule_status}")
+
+DF_CLUSTER_LABELS = None
+if os.path.exists(CLUSTER_LABELS_CSV):
+    DF_CLUSTER_LABELS = pd.read_csv(CLUSTER_LABELS_CSV)
+    print(f"Cluster labels: loaded ({len(DF_CLUSTER_LABELS):,} customers)")
+else:
+    print("Cluster labels: not found — run python prepare_cluster_labels.py")
 
 COL_MAP = {
     "AVG_TRXNS_WEEK":   "avg_num_trxns",
@@ -312,6 +319,22 @@ def compute_sar_backtest(df_sar_seg, sar_col, segment_name):
     return "\n".join(lines)
 
 
+# ── Cluster filter helper ─────────────────────────────────────────────────────
+def _filter_by_cluster(df_rule_sweep, cluster):
+    """
+    Return df_rule_sweep filtered to customers in a specific behavioral cluster.
+    cluster: int (1-based) or None (no filtering).
+    Requires DF_CLUSTER_LABELS to be loaded; silently skips filter if not available.
+    """
+    if cluster is None or DF_CLUSTER_LABELS is None:
+        return df_rule_sweep
+    cluster = int(cluster)
+    ids = DF_CLUSTER_LABELS[DF_CLUSTER_LABELS["cluster"] == cluster]["customer_id"]
+    filtered = df_rule_sweep[df_rule_sweep["customer_id"].isin(ids)]
+    print(f"[cluster filter] cluster={cluster}: {len(filtered)} / {len(df_rule_sweep)} rows")
+    return filtered
+
+
 # ── Tool executor ─────────────────────────────────────────────────────────────
 _cluster_cache = {}  # caches last clustering result for DISPLAY_CLUSTERS filtering
 _current_query = ""  # set before each orchestrator.run() so tool_executor can read it
@@ -349,7 +372,9 @@ def tool_executor(tool_name, tool_input):
         risk_factor = tool_input.get("risk_factor", "")
         param1      = tool_input.get("sweep_param_1") or None
         param2      = tool_input.get("sweep_param_2") or None
-        text, grid  = lambda_rule_analysis.compute_rule_2d_sweep(DF_RULE_SWEEP, risk_factor, param1, param2)
+        cluster     = tool_input.get("cluster", None)
+        df_sweep    = _filter_by_cluster(DF_RULE_SWEEP, cluster)
+        text, grid  = lambda_rule_analysis.compute_rule_2d_sweep(df_sweep, risk_factor, param1, param2)
         heatmap     = make_figures.rule_2d_heatmap(grid) if grid else None
         return text, heatmap
 
@@ -364,8 +389,10 @@ def tool_executor(tool_name, tool_input):
             return "Rule sweep data not found. Run python prepare_rule_sweep_data.py first.", None
         risk_factor = tool_input.get("risk_factor", tool_input.get("rule_code", ""))
         sweep_param = tool_input.get("sweep_param", None)
-        stats   = lambda_rule_analysis.compute_rule_sar_sweep(DF_RULE_SWEEP, risk_factor, sweep_param)
-        tbl_fig = make_figures.rule_sweep_figure(DF_RULE_SWEEP, risk_factor, sweep_param)
+        cluster     = tool_input.get("cluster", None)
+        df_sweep    = _filter_by_cluster(DF_RULE_SWEEP, cluster)
+        stats   = lambda_rule_analysis.compute_rule_sar_sweep(df_sweep, risk_factor, sweep_param)
+        tbl_fig = make_figures.rule_sweep_figure(df_sweep, risk_factor, sweep_param)
         return stats, tbl_fig
 
     elif tool_name == "alerts_distribution":
@@ -500,26 +527,30 @@ def _chart_content(tool_name, tool_input, fig):
 
     elif tool_name == "rule_2d_sweep":
         from lambda_rule_analysis import RULE_CATALOGUE, _match_rule
-        rf = tool_input.get("risk_factor", "")
-        p1 = tool_input.get("sweep_param_1") or None
-        p2 = tool_input.get("sweep_param_2") or None
+        rf      = tool_input.get("risk_factor", "")
+        p1      = tool_input.get("sweep_param_1") or None
+        p2      = tool_input.get("sweep_param_2") or None
+        cluster = tool_input.get("cluster", None)
         _, entry = _match_rule(rf)
         if entry and (p1 is None or p2 is None):
             d1, d2 = entry.get("default_2d", (None, None))
             if p1 is None: p1 = d1
             if p2 is None: p2 = d2
+        cluster_tag = f" [Cluster {cluster}]" if cluster else ""
         figs   = [fig]
-        labels = [f"2D Sweep — {rf} ({p1 or '?'} x {p2 or '?'})"]
+        labels = [f"2D Sweep — {rf} ({p1 or '?'} x {p2 or '?'}){cluster_tag}"]
 
     elif tool_name == "rule_sar_backtest":
         from lambda_rule_analysis import RULE_CATALOGUE, _match_rule
-        rf  = tool_input.get("risk_factor", tool_input.get("rule_code", ""))
-        sp  = tool_input.get("sweep_param") or None
+        rf      = tool_input.get("risk_factor", tool_input.get("rule_code", ""))
+        sp      = tool_input.get("sweep_param") or None
+        cluster = tool_input.get("cluster", None)
         _, entry = _match_rule(rf)
         if sp is None and entry:
             sp = entry["default_sweep"]
+        cluster_tag = f" [Cluster {cluster}]" if cluster else ""
         figs   = [fig]
-        labels = [f"Rule SAR Sweep — {rf} / {sp or 'default'}"]
+        labels = [f"Rule SAR Sweep — {rf} / {sp or 'default'}{cluster_tag}"]
 
     elif tool_name in ("cluster_analysis", "ss_cluster_analysis"):
         ct     = tool_input.get("customer_type", "All")
