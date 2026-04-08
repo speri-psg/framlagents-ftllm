@@ -51,18 +51,19 @@ def rule_list_figure(df_rule_sweep):
     n  = len(df)
 
     fig = go.Figure(go.Table(
+        columnwidth=[3, 1, 1, 1, 1, 3],
         header=dict(
             values=[f"<b>{c}</b>" for c in cols],
             fill_color=_HEADER_FILL,
             font=dict(color=_HEADER_FONT, family=_FONT_FAMILY, size=_FONT_SIZE),
-            align=["left", "right", "right", "right", "right", "right", "left"],
+            align=["left", "right", "right", "right", "right", "left"],
             height=32,
         ),
         cells=dict(
             values=[df[c].tolist() for c in cols],
             fill_color=[_alternating_fill(n)] * len(cols),
             font=dict(family=_FONT_FAMILY, size=_FONT_SIZE),
-            align=["left", "right", "right", "right", "right", "right", "left"],
+            align=["left", "right", "right", "right", "right", "left"],
             height=28,
         ),
     ))
