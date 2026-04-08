@@ -100,12 +100,18 @@ orchestrator = OrchestratorAgent()
 
 # ── Suggested prompts ─────────────────────────────────────────────────────────
 SUGGESTED_PROMPTS = [
-    "Show FP/FN threshold tuning for Business customers — weekly transaction count",
-    "Show FP/FN threshold tuning for Individual customers — monthly transaction amount",
-    "Cluster all customers into behavioral segments and show the treemap",
-    "Cluster Business customers into 4 segments",
-    "Show alerts and false positive distribution across segments",
-    "What does AML policy say about structuring detection thresholds?",
+    # Threshold Tuning
+    "Show FP/FN trade-off for Business customers by monthly transaction amount",
+    "Run SAR backtest for Individual customers using average weekly transactions",
+    "What is the crossover threshold for Business customers on average transaction amount?",
+    # Smart Segmentation
+    "Cluster Business customers by transaction behavior",
+    "Show me the behavioral segments for Individual customers",
+    "Which cluster of Business customers has the highest transaction volume?",
+    # Rule-Level Sweep
+    "Show SAR backtest for Activity Deviation ACH rule",
+    "Run a 2D sweep for Elder Abuse varying floor amount and age threshold",
+    "Show Elder Abuse SAR backtest for Cluster 4",
 ]
 
 # ── Welcome message ───────────────────────────────────────────────────────────
@@ -612,7 +618,8 @@ _sidebar = dbc.Card([
 
         html.Span("Suggested Prompts", className="fw-semibold d-block mb-2 small"),
         html.Div([
-            dbc.Button(
+            *[html.Span("Threshold Tuning", className="text-muted d-block mb-1 small fst-italic")],
+            *[dbc.Button(
                 p,
                 id={"type": "prompt-btn", "index": i},
                 color="outline-primary",
@@ -620,8 +627,27 @@ _sidebar = dbc.Card([
                 className="mb-2 text-start w-100",
                 style={"whiteSpace": "normal", "height": "auto"},
                 n_clicks=0,
-            )
-            for i, p in enumerate(SUGGESTED_PROMPTS)
+            ) for i, p in enumerate(SUGGESTED_PROMPTS[:3])],
+            *[html.Span("Smart Segmentation", className="text-muted d-block mb-1 mt-1 small fst-italic")],
+            *[dbc.Button(
+                p,
+                id={"type": "prompt-btn", "index": i + 3},
+                color="outline-success",
+                size="sm",
+                className="mb-2 text-start w-100",
+                style={"whiteSpace": "normal", "height": "auto"},
+                n_clicks=0,
+            ) for i, p in enumerate(SUGGESTED_PROMPTS[3:6])],
+            *[html.Span("Rule-Level Sweep", className="text-muted d-block mb-1 mt-1 small fst-italic")],
+            *[dbc.Button(
+                p,
+                id={"type": "prompt-btn", "index": i + 6},
+                color="outline-warning",
+                size="sm",
+                className="mb-2 text-start w-100",
+                style={"whiteSpace": "normal", "height": "auto"},
+                n_clicks=0,
+            ) for i, p in enumerate(SUGGESTED_PROMPTS[6:])],
         ]),
 
         html.Hr(className="my-2"),
