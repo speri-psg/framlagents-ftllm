@@ -768,3 +768,43 @@ def compute_rule_2d_sweep(df, risk_factor_keyword, param1=None, param2=None):
     lines.append("(Heatmap shown in the chart below.)")
 
     return "\n".join(lines), grid_dict
+
+
+def compute_2d_drilldown(df, risk_factor_keyword, param1, p1_val, param2, p2_val):
+    """
+    For a specific (p1_val, p2_val) cell in the 2D grid, return the customer-level breakdown:
+      - tp_df : SAR customers who ARE alerted (true positives)
+      - fp_df : non-SAR customers who ARE alerted (false positives)
+      - fn_df : SAR customers who are NOT alerted (false negatives — missed)
+      - tn_df : non-SAR customers who are NOT alerted (true negatives)
+    Also returns the column names for param1 / param2 for display.
+    Returns (tp_df, fp_df, fn_df, tn_df, col1, col2) or (None,)*6 on error.
+    """
+    rf_name, entry = _match_rule(risk_factor_keyword)
+    if entry is None:
+        return (None,) * 6
+
+    params = entry["sweep_params"]
+    if param1 not in params or param2 not in params:
+        return (None,) * 6
+
+    sp1 = params[param1]
+    sp2 = params[param2]
+    col1 = sp1.get("col", param1)
+    col2 = sp2.get("col", param2)
+
+    rule_df = df[df["risk_factor"] == rf_name].copy()
+    needed  = [c for c in [sp1.get("col"), sp2.get("col"), "is_sar"] if c]
+    known   = rule_df.dropna(subset=needed).copy()
+
+    m1      = _get_mask(known, sp1, float(p1_val))
+    m2      = _get_mask(known, sp2, float(p2_val))
+    alerted = m1 & m2
+    is_sar  = known["is_sar"] == 1
+
+    tp_df = known[ alerted &  is_sar].copy()
+    fp_df = known[ alerted & ~is_sar].copy()
+    fn_df = known[~alerted &  is_sar].copy()
+    tn_df = known[~alerted & ~is_sar].copy()
+
+    return tp_df, fp_df, fn_df, tn_df, col1, col2

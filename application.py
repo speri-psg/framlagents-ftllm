@@ -24,6 +24,7 @@ import pandas as pd
 import flask
 import dash_bootstrap_components as dbc
 from dash import Dash, callback, html, dcc, Input, Output, State, callback_context, ALL, no_update
+from dash import dash_table
 from dash_chat import ChatComponent
 
 from config import ALERTS_CSV, SS_CSV, SAR_CSV, CLUSTER_LABELS_CSV, OLLAMA_MODEL, OLLAMA_BASE_URL
@@ -342,8 +343,9 @@ def _filter_by_cluster(df_rule_sweep, cluster):
 
 
 # ── Tool executor ─────────────────────────────────────────────────────────────
-_cluster_cache = {}  # caches last clustering result for DISPLAY_CLUSTERS filtering
-_current_query = ""  # set before each orchestrator.run() so tool_executor can read it
+_cluster_cache  = {}  # caches last clustering result for DISPLAY_CLUSTERS filtering
+_current_query  = ""  # set before each orchestrator.run() so tool_executor can read it
+_last_2d_state  = {}  # caches last 2D sweep for drill-down (single-user demo)
 
 def tool_executor(tool_name, tool_input):
     """Execute a tool called by an agent. Returns (result_text, fig_or_None)."""
@@ -390,6 +392,15 @@ def tool_executor(tool_name, tool_input):
         df_sweep    = _filter_by_cluster(DF_RULE_SWEEP, cluster)
         text, grid  = lambda_rule_analysis.compute_rule_2d_sweep(df_sweep, risk_factor, param1, param2)
         heatmap     = make_figures.rule_2d_heatmap(grid) if grid else None
+        if grid:
+            _last_2d_state.update({
+                "grid":        grid,
+                "risk_factor": risk_factor,
+                "param1":      grid["param1"],
+                "param2":      grid["param2"],
+                "cluster":     cluster,
+                "ts":          time.time(),
+            })
         return text, heatmap
 
     elif tool_name == "list_rules":
@@ -675,6 +686,18 @@ _sidebar = dbc.Card([
             dbc.Badge(OLLAMA_MODEL, color="info", className="me-1"),
             dbc.Badge("Ollama", color="dark"),
         ]),
+
+        html.Hr(className="my-2"),
+
+        # Drill-down button — enabled after a 2D sweep
+        dbc.Button(
+            "Drill-down Last 2D Sweep",
+            id="drilldown-btn",
+            color="outline-secondary",
+            size="sm",
+            disabled=True,
+            className="w-100",
+        ),
     ])
 ], className="h-100 overflow-auto", style={"fontSize": "0.85rem"})
 
@@ -707,8 +730,31 @@ app.layout = dbc.Container([
     # Store for pending prompt from sidebar buttons
     dcc.Store(id="pending-prompt", data=None),
     dcc.Store(id="scroll-dummy"),
+    dcc.Store(id="last-2d-sweep-store", data=None),
     # One-shot interval to inject welcome message after page load
     dcc.Interval(id="welcome-interval", interval=300, max_intervals=1),
+
+    # ── Drill-down offcanvas ──────────────────────────────────────────────────
+    dbc.Offcanvas(
+        id="drilldown-offcanvas",
+        title="2D Sweep Drill-down — Click a cell to see customers",
+        placement="end",
+        is_open=False,
+        style={"width": "55vw"},
+        children=[
+            dcc.Graph(
+                id="drilldown-heatmap",
+                config={"responsive": True},
+                style={"height": "380px"},
+            ),
+            html.Hr(),
+            html.Div(
+                "Run a 2D sweep, then click a cell above to see the customer breakdown.",
+                id="drilldown-table-container",
+                style={"fontSize": "0.85rem", "overflowY": "auto", "maxHeight": "40vh"},
+            ),
+        ],
+    ),
 ], fluid=True, style={"height": "100vh", "overflow": "hidden"})
 
 
@@ -759,6 +805,7 @@ def queue_prompt(n_clicks_list):
 
 @callback(
     Output("chat-component", "messages"),
+    Output("last-2d-sweep-store", "data"),
     Input("chat-component", "new_message"),
     Input("pending-prompt", "data"),
     State("chat-component", "messages"),
@@ -779,7 +826,7 @@ def handle_chat(new_message, pending_prompt, messages):
         return messages
 
     if not query.strip():
-        return messages
+        return messages, no_update
 
     updated = messages + [user_msg]
 
@@ -795,7 +842,7 @@ def handle_chat(new_message, pending_prompt, messages):
         import traceback
         traceback.print_exc()
         bot_response = {"role": "assistant", "content": f"Sorry, something went wrong: {e}"}
-        return updated + [bot_response]
+        return updated + [bot_response], no_update
 
     # Parse DISPLAY_CLUSTERS directive and filter charts if present
     # Only honour the directive if the user actually asked to filter clusters
@@ -855,7 +902,121 @@ def handle_chat(new_message, pending_prompt, messages):
     else:
         bot_response = {"role": "assistant", "content": agent_text or "(No response)"}
 
-    return updated + [bot_response]
+    # Signal drill-down store if a 2D sweep was just run
+    sweep_store = no_update
+    if _last_2d_state and any(tn == "rule_2d_sweep" for tn, _, _ in (chart_results or [])):
+        sweep_store = {"ts": _last_2d_state.get("ts", 0)}
+
+    return updated + [bot_response], sweep_store
+
+
+# ── Drill-down callbacks ──────────────────────────────────────────────────────
+
+@callback(
+    Output("drilldown-heatmap", "figure"),
+    Output("drilldown-btn", "disabled"),
+    Input("last-2d-sweep-store", "data"),
+)
+def refresh_drilldown_heatmap(store_data):
+    """Re-render the interactive heatmap in the offcanvas whenever a new 2D sweep fires."""
+    if not store_data or not _last_2d_state.get("grid"):
+        return {}, True
+    fig = make_figures.rule_2d_heatmap(_last_2d_state["grid"])
+    return fig, False
+
+
+@callback(
+    Output("drilldown-offcanvas", "is_open"),
+    Input("drilldown-btn", "n_clicks"),
+    State("drilldown-offcanvas", "is_open"),
+    prevent_initial_call=True,
+)
+def toggle_drilldown(n, is_open):
+    return not is_open
+
+
+@callback(
+    Output("drilldown-table-container", "children"),
+    Input("drilldown-heatmap", "clickData"),
+    prevent_initial_call=True,
+)
+def drilldown_on_click(click_data):
+    """Filter customers at the clicked (p1, p2) cell and render a breakdown table."""
+    if not click_data or not _last_2d_state.get("grid"):
+        return "Click a cell in the heatmap to see customer breakdown."
+
+    pt    = click_data["points"][0]
+    p2_val = pt["x"]   # x-axis = param2
+    p1_val = pt["y"]   # y-axis = param1
+
+    rf      = _last_2d_state["risk_factor"]
+    param1  = _last_2d_state["param1"]
+    param2  = _last_2d_state["param2"]
+    cluster = _last_2d_state.get("cluster")
+
+    df_sweep = _filter_by_cluster(DF_RULE_SWEEP, cluster)
+    tp_df, fp_df, fn_df, tn_df, col1, col2 = lambda_rule_analysis.compute_2d_drilldown(
+        df_sweep, rf, param1, p1_val, param2, p2_val
+    )
+
+    if tp_df is None:
+        return "Could not compute drill-down — rule data unavailable."
+
+    grid    = _last_2d_state["grid"]
+    p1_lbl  = grid["p1_label"]
+    p2_lbl  = grid["p2_label"]
+
+    def _fmt(v):
+        try:
+            return f"{float(v):,.1f}"
+        except Exception:
+            return str(v)
+
+    def _make_table(df, status_label, status_color):
+        if df is None or len(df) == 0:
+            return html.P(f"No {status_label} customers at this cell.", className="text-muted small mb-1")
+        cols = ["customer_id", "customer_type"]
+        if col1 in df.columns: cols.append(col1)
+        if col2 in df.columns and col2 != col1: cols.append(col2)
+        display_df = df[cols].copy().head(50)
+        for c in [col1, col2]:
+            if c in display_df.columns:
+                display_df[c] = display_df[c].apply(_fmt)
+        return html.Div([
+            html.P(
+                f"{status_label} — {len(df)} customer(s)"
+                + (" (showing first 50)" if len(df) > 50 else ""),
+                className=f"fw-semibold text-{status_color} mb-1 small",
+            ),
+            dash_table.DataTable(
+                data=display_df.to_dict("records"),
+                columns=[{"name": c, "id": c} for c in display_df.columns],
+                style_table={"overflowX": "auto", "marginBottom": "12px"},
+                style_cell={"fontSize": "0.78rem", "padding": "3px 6px", "textAlign": "left"},
+                style_header={"fontWeight": "bold", "backgroundColor": "#f8f9fa"},
+                page_size=20,
+            ),
+        ])
+
+    header = html.Div([
+        html.P(
+            f"{rf} @ {param1}={_fmt(p1_val)} ({p1_lbl}), {param2}={_fmt(p2_val)} ({p2_lbl})",
+            className="fw-bold mb-2",
+        ),
+        html.Div([
+            dbc.Badge(f"TP={len(tp_df)}", color="success", className="me-1"),
+            dbc.Badge(f"FP={len(fp_df)}", color="warning",  className="me-1"),
+            dbc.Badge(f"FN={len(fn_df)}", color="danger",   className="me-1"),
+            dbc.Badge(f"TN={len(tn_df)}", color="secondary"),
+        ], className="mb-3"),
+    ])
+
+    return html.Div([
+        header,
+        _make_table(fn_df, "Missed SARs (FN)", "danger"),
+        _make_table(fp_df, "False Positives (FP)", "warning"),
+        _make_table(tp_df, "Caught SARs (TP)", "success"),
+    ])
 
 
 if __name__ == "__main__":
