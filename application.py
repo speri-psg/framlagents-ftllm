@@ -351,7 +351,11 @@ def tool_executor(tool_name, tool_input):
 
     if tool_name == "threshold_tuning":
         segment = tool_input.get("segment", "Business")
-        col     = COL_MAP.get(tool_input.get("threshold_column", "AVG_TRXNS_WEEK"), "avg_num_trxns")
+        raw_col = tool_input.get("threshold_column", "AVG_TRXNS_WEEK")
+        col     = COL_MAP.get(raw_col)
+        if col is None:
+            return (f"'{raw_col}' is not a valid threshold_column. "
+                    f"Valid options: AVG_TRXNS_WEEK, AVG_TRXN_AMT, TRXN_AMT_MONTHLY."), None
         df_seg  = DF_BUSINESS if segment == "Business" else DF_INDIVIDUAL
         stats   = compute_threshold_stats(df_seg, col)
         line_fig, _ = lambda_ss_performance.plot_thresholds_tuning(df_seg, col, 0.1, segment)
@@ -366,7 +370,11 @@ def tool_executor(tool_name, tool_input):
         if DF_SAR is None:
             return "SAR simulation data not found. Run python simulate_sars.py first.", None
         segment    = tool_input.get("segment", "Business")
-        col        = SAR_COL_MAP.get(tool_input.get("threshold_column", "TRXN_AMT_MONTHLY"), "trxn_amt_monthly")
+        raw_col    = tool_input.get("threshold_column", "TRXN_AMT_MONTHLY")
+        col        = SAR_COL_MAP.get(raw_col)
+        if col is None:
+            return (f"'{raw_col}' is not a valid threshold_column. "
+                    f"Valid options: AVG_TRXNS_WEEK, AVG_TRXN_AMT, TRXN_AMT_MONTHLY."), None
         df_sar_seg = DF_SAR_BUSINESS if segment == "Business" else DF_SAR_INDIVIDUAL
         stats      = compute_sar_backtest(df_sar_seg, col, segment)
         tbl_fig    = make_figures.sar_backtest_figure(df_sar_seg, col, segment)
