@@ -112,7 +112,7 @@ RULE_CATALOGUE = {
             },
         },
         "default_sweep": "z_threshold",
-        "default_2d":   ("z_threshold", "age_threshold"),
+        "default_2d":   ("floor_amount", "age_threshold"),
     },
     "velocity single": {
         "name":        "Velocity Single",
