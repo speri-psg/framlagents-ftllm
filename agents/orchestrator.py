@@ -130,10 +130,43 @@ class OrchestratorAgent:
                 messages=classify_messages,
             )
             raw = resp.choices[0].message.content or ""
-            labels = [l.strip().lower() for l in raw.split(",") if l.strip()]
+            valid = {"threshold", "segmentation", "policy", "greeting", "out_of_scope"}
+            labels = [l.strip().lower() for l in raw.split(",") if l.strip().lower() in valid]
         except Exception as e:
             print(f"[orchestrator] classification error: {e} — defaulting to out_of_scope")
             labels = ["out_of_scope"]
+
+        # Keyword override — correct obvious misrouting regardless of LLM output
+        q_lower = query.lower()
+        is_segmentation = any(w in q_lower for w in ["cluster", "segment", "k-means", "kmeans", "treemap"])
+        is_threshold = any(w in q_lower for w in ["sweep", "fp", "fn", "sar", "heatmap", "backtest", "tuning", "threshold"])
+        is_rule_query = any(w in q_lower for w in ["rule", "rules", "false positive", "false negative", "precision", "layering", "structuring"])
+        # "cluster N" in a sweep/backtest query = filter, not segmentation request
+        cluster_as_filter = is_threshold and is_segmentation
+        if is_segmentation and not is_threshold:
+            labels = ["segmentation"]
+            print("[orchestrator] keyword override → segmentation")
+        elif cluster_as_filter:
+            labels = ["threshold"]
+            print("[orchestrator] keyword override → threshold (cluster is a filter, not segmentation)")
+        elif is_rule_query and "policy" in labels and "threshold" in labels:
+            labels = ["threshold"]
+            print("[orchestrator] keyword override → threshold (rule query, dropped policy)")
+
+        # Keyword fallback when fine-tuned model ignores classification prompt
+        if not labels:
+            q = query.lower()
+            if any(w in q for w in ["threshold", "sweep", "fp", "fn", "sar", "heatmap", "rule", "alert", "tuning", "backtest"]):
+                labels = ["threshold"]
+            elif any(w in q for w in ["cluster", "segment", "k-means", "kmeans", "treemap"]):
+                labels = ["segmentation"]
+            elif any(w in q for w in ["policy", "compliance", "regulation", "bsa", "aml", "wolfsberg", "fincen", "structuring"]):
+                labels = ["policy"]
+            elif any(w in q for w in ["hello", "hi", "hey", "howdy", "greetings"]):
+                labels = ["greeting"]
+            else:
+                labels = ["out_of_scope"]
+            print(f"[orchestrator] keyword fallback labels: {labels}")
 
         print(f"[orchestrator] routing to: {labels}")
         return labels
