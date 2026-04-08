@@ -58,6 +58,19 @@ Key distinction:
 - "How many alerts does the Individual segment have?" → threshold  (segment_stats tool)
 - "What are the transaction stats for Business customers?" → threshold
 - "Show me Business customer stats" → threshold
+- "Show me all AML rules" → threshold  (list_rules is a threshold tool — NOT policy)
+- "What rules are in the system?" → threshold
+- "List all the AML rules" → threshold
+- "What transactions are flagged by the layering rule?" → threshold  (list_rules — 'layering' is not a KB topic)
+- "Which rule covers layering?" → threshold  (list_rules)
+- "Show rule sweep for xyz_column" → threshold  (rule sweep request, even with unknown param — NOT out_of_scope)
+- "Show rule sweep for an invalid parameter" → threshold
+- "What is the SAR filing rate for Individual?" → threshold  (sar_backtest is a threshold tool)
+- "SAR filing rate for Business" → threshold
+- "Which rule has the highest FP rate?" → threshold  (list_rules)
+- "Which rules generate only false positives?" → threshold
+- "Run a SAR backtest for the structuring rule" → threshold  (rule_sar_backtest — NOT out_of_scope)
+- "SAR backtest for Elder Abuse" → threshold
 
 Rules:
 - Output ONLY the label(s), comma-separated. No explanation, no punctuation other than commas.
