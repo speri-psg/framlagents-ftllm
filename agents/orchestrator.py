@@ -75,6 +75,10 @@ Key distinction:
 - "Run SAR backtest for Activity Deviation ACH in Cluster 2" → threshold
 - "Show 2D heatmap for Elder Abuse for Cluster 3" → threshold
 - "Which cluster has the most false positives for Velocity Single?" → threshold
+- "Which cluster of Business customers has the highest transaction volume?" → segmentation
+- "Which Business cluster has the most activity?" → segmentation
+- "Which cluster has the most transaction activity?" → segmentation
+- "Show Business customer clusters by transaction behavior" → segmentation
 
 Rules:
 - Output ONLY the label(s), comma-separated. No explanation, no punctuation other than commas.
