@@ -506,3 +506,201 @@ def rule_2d_heatmap(grid_dict):
         annotations=annotations,
     )
     return fig
+
+
+# ── 8. Rule alert distribution by cluster ────────────────────────────────────
+
+def rule_alerts_by_cluster(df_rule_sweep, df_cluster_labels, rf_name, target_cluster):
+    """
+    Grouped bar chart: Alerts / SARs / FPs for rf_name broken down by cluster.
+    target_cluster (1-indexed) is highlighted. df_cluster_labels has 1-indexed cluster column.
+    """
+    import plotly.graph_objects as go
+
+    rule_df = df_rule_sweep[df_rule_sweep["risk_factor"] == rf_name].copy()
+    if rule_df.empty or df_cluster_labels is None:
+        return None
+
+    merged = rule_df.merge(df_cluster_labels[["customer_id", "cluster"]], on="customer_id", how="left")
+    merged = merged.dropna(subset=["cluster"])
+    if merged.empty:
+        return None
+
+    merged["cluster"] = merged["cluster"].astype(int)
+    groups = sorted(merged["cluster"].unique())
+
+    cluster_labels = [f"Cluster {c}" for c in groups]
+    alerts = [len(merged[merged["cluster"] == c]) for c in groups]
+    sars   = [int(merged[merged["cluster"] == c]["is_sar"].sum()) for c in groups]
+    fps    = [a - s for a, s in zip(alerts, sars)]
+
+    # Highlight target cluster bar with a marker
+    target_int = int(target_cluster)
+    marker_colors_sar = ["#c0392b" if c == target_int else "#e74c3c" for c in groups]
+    marker_colors_fp  = ["#e67e22" if c == target_int else "#f39c12" for c in groups]
+
+    fig = go.Figure([
+        go.Bar(name="SAR (TP)", x=cluster_labels, y=sars,
+               marker_color=marker_colors_sar, text=sars, textposition="auto"),
+        go.Bar(name="FP",       x=cluster_labels, y=fps,
+               marker_color=marker_colors_fp,  text=fps,  textposition="auto"),
+    ])
+    fig.update_layout(
+        barmode="stack",
+        title=f"{rf_name} — Alert Distribution by Cluster (Cluster {target_int} selected)",
+        xaxis_title="Cluster",
+        yaxis_title="Alerted Customers",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+        margin=dict(l=10, r=10, t=70, b=40),
+        height=340,
+        font=dict(family=_FONT_FAMILY, size=_FONT_SIZE),
+    )
+    return fig
+
+
+# ── 9. Cluster profile table (shown alongside cluster-filtered sweeps) ─────────
+
+def cluster_profile_table(df_clustered, target_cluster):
+    """
+    Table of per-cluster stats with target_cluster row highlighted in gold.
+    df_clustered has 0-indexed cluster labels; display as 1-indexed.
+    target_cluster is 1-indexed (as the user specifies it).
+    """
+    numeric_cols = [c for c in [
+        "avg_weekly_trxn_amt", "trxn_amt_monthly",
+        "CURRENT_BALANCE", "ACCT_AGE_YEARS", "AGE",
+    ] if c in df_clustered.columns]
+
+    rows = []
+    for cid, grp in sorted(df_clustered.groupby("cluster")):
+        display_id = int(cid) + 1  # convert 0-indexed → 1-indexed
+        row = {"Cluster": f"Cluster {display_id}", "n": len(grp)}
+        for col in numeric_cols:
+            row[col] = round(grp[col].median(), 1)
+        rows.append(row)
+
+    if not rows:
+        return None
+
+    df_t = pd.DataFrame(rows)
+    cols = list(df_t.columns)
+
+    # Highlight target cluster row
+    highlight_gold = "#f5c518"
+    normal_odd     = _ROW_FILL_ODD
+    normal_even    = _ROW_FILL_EVEN
+    fill_colors = []
+    for col in cols:
+        col_colors = []
+        for i, row in df_t.iterrows():
+            label = row["Cluster"]
+            if label == f"Cluster {int(target_cluster)}":
+                col_colors.append(highlight_gold)
+            elif i % 2 == 0:
+                col_colors.append(normal_odd)
+            else:
+                col_colors.append(normal_even)
+        fill_colors.append(col_colors)
+
+    # Format numeric values
+    def _fmt_col(series, col_name):
+        if col_name == "n":
+            return [f"{int(v):,}" for v in series]
+        if col_name in ("ACCT_AGE_YEARS", "AGE"):
+            return [f"{v:.1f}" for v in series]
+        return [f"{v:,.0f}" for v in series]
+
+    cell_values = [_fmt_col(df_t[c], c) for c in cols]
+
+    fig = go.Figure(go.Table(
+        header=dict(
+            values=[f"<b>{c}</b>" for c in cols],
+            fill_color=_HEADER_FILL,
+            font=dict(color=_HEADER_FONT, family=_FONT_FAMILY, size=_FONT_SIZE),
+            align=["left"] + ["right"] * (len(cols) - 1),
+            height=32,
+        ),
+        cells=dict(
+            values=cell_values,
+            fill_color=fill_colors,
+            font=dict(family=_FONT_FAMILY, size=_FONT_SIZE),
+            align=["left"] + ["right"] * (len(cols) - 1),
+            height=26,
+        ),
+    ))
+    n_rows = len(rows)
+    fig.update_layout(
+        title=f"Cluster Profiles — Cluster {int(target_cluster)} highlighted",
+        margin=dict(l=10, r=10, t=40, b=10),
+        height=_table_height(n_rows, row_h=26),
+    )
+    return fig
+
+
+# ── 9. Cluster stats summary table (shown with every clustering result) ────────
+
+def cluster_stats_table(df_clustered, customer_type="All"):
+    """
+    Summary table of all cluster stats — replaces the hard-to-read text block.
+    df_clustered has 0-indexed cluster labels; display as 1-indexed.
+    """
+    numeric_cols = [c for c in [
+        "avg_weekly_trxn_amt", "trxn_amt_monthly",
+        "CURRENT_BALANCE", "ACCT_AGE_YEARS", "AGE",
+    ] if c in df_clustered.columns]
+
+    total_n = len(df_clustered)
+
+    rows = []
+    for cid, grp in sorted(df_clustered.groupby("cluster")):
+        display_id = int(cid) + 1  # convert 0-indexed → 1-indexed
+        pct  = round(100 * len(grp) / total_n, 1) if total_n > 0 else 0.0
+        row  = {"Cluster": f"Cluster {display_id}", "n": len(grp), "% of Active": f"{pct}%"}
+        for col in numeric_cols:
+            row[col] = round(grp[col].median(), 1)
+        rows.append(row)
+
+    if not rows:
+        return None
+
+    df_t = pd.DataFrame(rows)
+    cols = list(df_t.columns)
+
+    n_rows = len(rows)
+    fill_colors = []
+    for col in cols:
+        fill_colors.append([_ROW_FILL_ODD if i % 2 == 0 else _ROW_FILL_EVEN for i in range(n_rows)])
+
+    def _fmt_col(series, col_name):
+        if col_name in ("Cluster", "% of Active"):
+            return list(series)
+        if col_name == "n":
+            return [f"{int(v):,}" for v in series]
+        if col_name in ("ACCT_AGE_YEARS", "AGE"):
+            return [f"{v:.1f}" for v in series]
+        return [f"{v:,.0f}" for v in series]
+
+    cell_values = [_fmt_col(df_t[c], c) for c in cols]
+
+    fig = go.Figure(go.Table(
+        header=dict(
+            values=[f"<b>{c}</b>" for c in cols],
+            fill_color=_HEADER_FILL,
+            font=dict(color=_HEADER_FONT, family=_FONT_FAMILY, size=_FONT_SIZE),
+            align=["left", "right", "right"] + ["right"] * len(numeric_cols),
+            height=32,
+        ),
+        cells=dict(
+            values=cell_values,
+            fill_color=fill_colors,
+            font=dict(family=_FONT_FAMILY, size=_FONT_SIZE),
+            align=["left", "right", "right"] + ["right"] * len(numeric_cols),
+            height=26,
+        ),
+    ))
+    fig.update_layout(
+        title=f"Cluster Summary — {customer_type}",
+        margin=dict(l=10, r=10, t=40, b=10),
+        height=_table_height(n_rows, row_h=26),
+    )
+    return fig

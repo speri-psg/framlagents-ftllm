@@ -23,10 +23,6 @@ TOOLS = [
                         "enum": ["Business", "Individual", "All"],
                         "description": "Which customer segment to cluster.",
                     },
-                    "n_clusters": {
-                        "type": "integer",
-                        "description": "Number of clusters (2-8). Use 0 to auto-select. Default 4.",
-                    },
                 },
                 "required": ["customer_type"],
             },
@@ -75,10 +71,6 @@ TOOLS = [
                         "type": "string",
                         "enum": ["Business", "Individual", "All"],
                         "description": "Which customer segment to cluster.",
-                    },
-                    "n_clusters": {
-                        "type": "integer",
-                        "description": "Number of clusters (2-8). Use 0 to auto-select. Default 4.",
                     },
                 },
                 "required": ["customer_type"],

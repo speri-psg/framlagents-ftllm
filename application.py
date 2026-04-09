@@ -84,6 +84,25 @@ if os.path.exists(CLUSTER_LABELS_CSV):
 else:
     print("Cluster labels: not found — run python prepare_cluster_labels.py")
 
+# ── Pre-populate cluster cache at startup ─────────────────────────────────────
+# Runs clustering once so alert-distribution charts work without the user
+# having to run "Cluster all customers" first.
+_startup_cluster_cache = {}
+if DF_SS is not None:
+    try:
+        print("Pre-computing cluster cache at startup...")
+        import ss_data_prep, lambda_ss_performance
+        _sc_fig, _sc_stats, _sc_df = lambda_ss_performance.perform_clustering(DF_SS, "All", 4)
+        _startup_cluster_cache = {
+            "df_clustered":  _sc_df,
+            "scatter_fig":   _sc_fig,
+            "stats":         _sc_stats,
+            "customer_type": "All",
+        }
+        print(f"Startup cluster cache ready: {len(_sc_df):,} customers, 4 clusters")
+    except Exception as _e:
+        print(f"Startup clustering failed (non-fatal): {_e}")
+
 COL_MAP = {
     "AVG_TRXNS_WEEK":   "avg_num_trxns",
     "AVG_TRXN_AMT":     "avg_trxn_amt",
@@ -331,19 +350,19 @@ def _filter_by_cluster(df_rule_sweep, cluster):
     """
     Return df_rule_sweep filtered to customers in a specific behavioral cluster.
     cluster: int (1-based) or None (no filtering).
-    Requires DF_CLUSTER_LABELS to be loaded; silently skips filter if not available.
+    Uses static DF_CLUSTER_LABELS (1-indexed, built from alerted population).
     """
     if cluster is None or DF_CLUSTER_LABELS is None:
         return df_rule_sweep
     cluster = int(cluster)
-    ids = DF_CLUSTER_LABELS[DF_CLUSTER_LABELS["cluster"] == cluster]["customer_id"]
+    ids      = DF_CLUSTER_LABELS[DF_CLUSTER_LABELS["cluster"] == cluster]["customer_id"]
     filtered = df_rule_sweep[df_rule_sweep["customer_id"].isin(ids)]
     print(f"[cluster filter] cluster={cluster}: {len(filtered)} / {len(df_rule_sweep)} rows")
     return filtered
 
 
 # ── Tool executor ─────────────────────────────────────────────────────────────
-_cluster_cache  = {}  # caches last clustering result for DISPLAY_CLUSTERS filtering
+_cluster_cache  = _startup_cluster_cache  # pre-populated at startup; updated on each cluster run
 _current_query  = ""  # set before each orchestrator.run() so tool_executor can read it
 _last_2d_state  = {}  # caches last 2D sweep for drill-down (single-user demo)
 
@@ -401,6 +420,13 @@ def tool_executor(tool_name, tool_input):
                 "cluster":     cluster,
                 "ts":          time.time(),
             })
+        # If cluster-filtered, also show rule alert distribution by cluster
+        if cluster is not None and heatmap is not None and DF_CLUSTER_LABELS is not None:
+            dist_fig = make_figures.rule_alerts_by_cluster(
+                DF_RULE_SWEEP, DF_CLUSTER_LABELS, grid["rf_name"] if grid else risk_factor, cluster
+            )
+            if dist_fig is not None:
+                return text, (heatmap, dist_fig)
         return text, heatmap
 
     elif tool_name == "list_rules":
@@ -513,10 +539,12 @@ def tool_executor(tool_name, tool_input):
                 "stats":        stats,
                 "customer_type": customer_type,
             })
-            treemap_fig = lambda_ss_performance.smartseg_tree_dynamic(
+            treemap_fig  = lambda_ss_performance.smartseg_tree_dynamic(
                 df_clustered, customer_type, dims=ss_dims
             )
-            return stats, (scatter_fig, treemap_fig)
+            stats_table  = make_figures.cluster_stats_table(df_clustered, customer_type)
+            figs = (stats_table, scatter_fig, treemap_fig) if stats_table is not None else (scatter_fig, treemap_fig)
+            return stats, figs
 
     return f"Unknown tool: {tool_name}", None
 
@@ -562,8 +590,15 @@ def _chart_content(tool_name, tool_input, fig):
             if p1 is None: p1 = d1
             if p2 is None: p2 = d2
         cluster_tag = f" [Cluster {cluster}]" if cluster else ""
-        figs   = [fig]
-        labels = [f"2D Sweep — {rf} ({p1 or '?'} x {p2 or '?'}){cluster_tag}"]
+        if isinstance(fig, tuple):
+            figs   = list(fig)
+            labels = [
+                f"2D Sweep — {rf} ({p1 or '?'} x {p2 or '?'}){cluster_tag}",
+                f"{rf} — Alerts by Cluster",
+            ]
+        else:
+            figs   = [fig]
+            labels = [f"2D Sweep — {rf} ({p1 or '?'} x {p2 or '?'}){cluster_tag}"]
 
     elif tool_name == "rule_sar_backtest":
         from lambda_rule_analysis import RULE_CATALOGUE, _match_rule
@@ -580,7 +615,10 @@ def _chart_content(tool_name, tool_input, fig):
     elif tool_name in ("cluster_analysis", "ss_cluster_analysis"):
         ct     = tool_input.get("customer_type", "All")
         prefix = "SS " if tool_name == "ss_cluster_analysis" else ""
-        if isinstance(fig, tuple):
+        if isinstance(fig, tuple) and len(fig) == 3:
+            figs   = list(fig)
+            labels = [f"Cluster Summary — {ct}", f"{prefix}Cluster Scatter — {ct}", f"{prefix}Smart Segment Treemap — {ct}"]
+        elif isinstance(fig, tuple):
             figs   = list(fig)
             labels = [f"{prefix}Cluster Scatter — {ct}", f"{prefix}Smart Segment Treemap — {ct}"]
         else:
@@ -823,7 +861,7 @@ def handle_chat(new_message, pending_prompt, messages):
         query    = new_message.get("content", "")
         user_msg = new_message
     else:
-        return messages
+        return messages, no_update
 
     if not query.strip():
         return messages, no_update
@@ -946,8 +984,10 @@ def drilldown_on_click(click_data):
         return "Click a cell in the heatmap to see customer breakdown."
 
     pt    = click_data["points"][0]
-    p2_val = pt["x"]   # x-axis = param2
-    p1_val = pt["y"]   # y-axis = param1
+    # x/y in click_data are axis indices — look up actual parameter values from grid
+    grid   = _last_2d_state["grid"]
+    p2_val = grid["p2_vals"][int(pt["x"])]
+    p1_val = grid["p1_vals"][int(pt["y"])]
 
     rf      = _last_2d_state["risk_factor"]
     param1  = _last_2d_state["param1"]
