@@ -516,7 +516,7 @@ def _cluster_title(trxns, amt, overall_trxns, overall_amt):
     return f"{freq} / {value}"
 
 
-def smartseg_tree_dynamic(df_clustered, seg_label="All", dims=None):
+def smartseg_tree_dynamic(df_clustered, seg_label="All", dims=None, df_rule_sweep=None):
     """
     Build a treemap from a cluster-labelled DataFrame (output of perform_clustering).
 
@@ -539,6 +539,16 @@ def smartseg_tree_dynamic(df_clustered, seg_label="All", dims=None):
         dims = ['customer_type', 'ACCOUNT_TYPE']
 
     df = df_clustered.copy()
+
+    # Enrich with SAR/alert info from rule sweep if provided
+    if df_rule_sweep is not None and 'customer_id' in df.columns:
+        sar_map   = df_rule_sweep.groupby('customer_id')['is_sar'].max()
+        alerted   = set(df_rule_sweep['customer_id'].unique())
+        df['is_sar']     = df['customer_id'].map(sar_map).fillna(0).astype(int)
+        df['is_alerted'] = df['customer_id'].isin(alerted).astype(int)
+        df['is_fp']      = ((df['is_alerted'] == 1) & (df['is_sar'] == 0)).astype(int)
+    else:
+        df['is_sar'] = 0; df['is_alerted'] = 0; df['is_fp'] = 0
 
     # Overall means over active accounts only for cluster title relative comparisons
     _active_all = df[df['avg_num_trxns'].fillna(0) > 0] if 'avg_num_trxns' in df.columns else df
@@ -577,6 +587,10 @@ def smartseg_tree_dynamic(df_clustered, seg_label="All", dims=None):
             'pct_active': pct_active,
             'NUM_COUNT': len(sub),
             'cidx': cidx,
+            # AML risk counts
+            'n_sar':     int(sub['is_sar'].sum()),
+            'n_alerted': int(sub['is_alerted'].sum()),
+            'n_fp':      int(sub['is_fp'].sum()),
         })
 
     def build_nodes(sub_df, parent_id, remaining_dims, cidx):
@@ -651,13 +665,16 @@ def smartseg_tree_dynamic(df_clustered, seg_label="All", dims=None):
         parents=tree_df['parent'],
         values=tree_df['NUM_COUNT'],
         customdata=np.column_stack([
-            tree_df['avg_num_trxns'].fillna(0),
-            tree_df['avg_weekly_trxn_amt'].fillna(0),
-            tree_df['NUM_COUNT'].fillna(0),
-            tree_df['trxn_amt_monthly'].fillna(0),
-            tree_df['INCOME'].fillna(0),
-            tree_df['AGE'].fillna(0),
-            tree_df['pct_active'].fillna(0),
+            tree_df['avg_num_trxns'].fillna(0),       # 0
+            tree_df['avg_weekly_trxn_amt'].fillna(0), # 1
+            tree_df['NUM_COUNT'].fillna(0),            # 2
+            tree_df['trxn_amt_monthly'].fillna(0),     # 3
+            tree_df['INCOME'].fillna(0),               # 4
+            tree_df['AGE'].fillna(0),                  # 5
+            tree_df['pct_active'].fillna(0),           # 6
+            tree_df['n_sar'].fillna(0),                # 7
+            tree_df['n_alerted'].fillna(0),            # 8
+            tree_df['n_fp'].fillna(0),                 # 9
         ]),
         hovertemplate=(
             '<b>%{label}</b><br>'
@@ -669,13 +686,15 @@ def smartseg_tree_dynamic(df_clustered, seg_label="All", dims=None):
             + ('' if seg_label == 'Business' else
                'Avg Income: $%{customdata[4]:.0f}<br>'
                'Avg Age: %{customdata[5]:.0f}<br>')
-            + '<extra></extra>'
+            + '─────────────────<br>'
+            'Alerts: %{customdata[8]:.0f} | SARs: %{customdata[7]:.0f} | FPs: %{customdata[9]:.0f}<br>'
+            '<extra></extra>'
         ),
         texttemplate=(
             '<b>%{label}</b><br>'
             'n=%{customdata[2]:.0f}<br>'
-            'active=%{customdata[6]:.0f}%<br>'
-            'wk_amt=$%{customdata[1]:.0f}'
+            'SAR=%{customdata[7]:.0f} FP=%{customdata[9]:.0f}<br>'
+            'wk=$%{customdata[1]:.0f}'
         ),
         marker=dict(colors=node_colors),
     ))

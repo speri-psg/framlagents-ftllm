@@ -463,7 +463,7 @@ def tool_executor(tool_name, tool_input):
             "INDIVIDUAL": ["ACCOUNT_TYPE", "GENDER", "AGE_CATEGORY", "INCOME_BAND"],
         }
         treemap_fig = lambda_ss_performance.smartseg_tree_dynamic(
-            df_clustered, customer_type, dims=ss_dims
+            df_clustered, customer_type, dims=ss_dims, df_rule_sweep=DF_RULE_SWEEP
         )
         return stats, (scatter_fig, treemap_fig)
 
@@ -524,7 +524,7 @@ def tool_executor(tool_name, tool_input):
                             if 1 <= c <= len(cluster_vals)}
             df_filtered  = df_clustered[df_clustered["cluster"].isin(keep_0based)].copy()
             treemap_fig  = lambda_ss_performance.smartseg_tree_dynamic(
-                df_filtered, f"{customer_type} (clusters {filter_clusters})", dims=ss_dims
+                df_filtered, f"{customer_type} (clusters {filter_clusters})", dims=ss_dims, df_rule_sweep=DF_RULE_SWEEP
             )
             return f"Filtered to clusters {filter_clusters}.\n\n{stats}", (filtered_scatter, treemap_fig)
 
@@ -540,7 +540,7 @@ def tool_executor(tool_name, tool_input):
                 "customer_type": customer_type,
             })
             treemap_fig  = lambda_ss_performance.smartseg_tree_dynamic(
-                df_clustered, customer_type, dims=ss_dims
+                df_clustered, customer_type, dims=ss_dims, df_rule_sweep=DF_RULE_SWEEP
             )
             stats_table  = make_figures.cluster_stats_table(df_clustered, customer_type)
             figs = (stats_table, scatter_fig, treemap_fig) if stats_table is not None else (scatter_fig, treemap_fig)
@@ -911,7 +911,7 @@ def handle_chat(new_message, pending_prompt, messages):
             keep_0based  = {cluster_vals[c - 1] for c in filter_nums if 1 <= c <= len(cluster_vals)}
             df_filtered  = df_clustered[df_clustered["cluster"].isin(keep_0based)].copy()
             treemap_fig  = lambda_ss_performance.smartseg_tree_dynamic(
-                df_filtered, f"{customer_type} — clusters {filter_nums}", dims=ss_dims
+                df_filtered, f"{customer_type} — clusters {filter_nums}", dims=ss_dims, df_rule_sweep=DF_RULE_SWEEP
             )
             chart_results = [("ss_cluster_analysis",
                               {"customer_type": customer_type, "filter_clusters": filter_nums},
