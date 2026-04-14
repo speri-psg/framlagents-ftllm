@@ -56,6 +56,12 @@ DF_INDIVIDUAL= DF[DF["smart_segment_id"] == 1]
 
 DF_SS  = pd.read_csv(SS_CSV) if os.path.exists(SS_CSV) else None
 DF_SAR = pd.read_csv(SAR_CSV) if os.path.exists(SAR_CSV) else None
+
+_TXN_CSV = os.path.join(_HERE, "docs", "aml_transactions.csv")
+DF_TXN   = pd.read_csv(_TXN_CSV, parse_dates=["txn_date"]) if os.path.exists(_TXN_CSV) else None
+_NET_CSV = os.path.join(_HERE, "docs", "network_features.csv")
+DF_NET   = pd.read_csv(_NET_CSV).set_index("customer_id") if os.path.exists(_NET_CSV) else None
+print(f"Transaction data: {'loaded (' + str(len(DF_TXN)) + ' rows)' if DF_TXN is not None else 'not found — run generate_aml_transactions.py'}")
 DF_SAR_BUSINESS    = DF_SAR[DF_SAR["smart_segment_id"] == 0] if DF_SAR is not None else None
 DF_SAR_INDIVIDUAL  = DF_SAR[DF_SAR["smart_segment_id"] == 1] if DF_SAR is not None else None
 
@@ -68,6 +74,17 @@ print(f"Alerts data: {_total:,} rows | Business={_biz_count:,} Individual={_ind_
 print(f"SS data: {'loaded (' + str(len(DF_SS)) + ' rows)' if DF_SS is not None else 'not found — run python ss_data_prep.py'}")
 _sar_status = (f"loaded ({len(DF_SAR)} rows, {int(DF_SAR['is_sar'].sum())} SARs)" if DF_SAR is not None else "not found - run python simulate_sars.py")
 print(f"SAR simulation: {_sar_status}")
+
+# ── SAR propensity model ──────────────────────────────────────────────────────
+import sar_scorer as _sar_scorer
+_sar_scores_df = None
+_sar_roc_auc   = None
+if DF_SAR is not None:
+    try:
+        _, _sar_roc_auc = _sar_scorer.train(DF_SAR)
+        _sar_scores_df  = _sar_scorer.score_alerts(DF_SAR)
+    except Exception as _e:
+        print(f"[sar_scorer] Failed (non-fatal): {_e}")
 
 DF_RULE_SWEEP = lambda_rule_analysis.load_rule_sweep_data()
 _rule_status = (
@@ -84,6 +101,266 @@ if os.path.exists(CLUSTER_LABELS_CSV):
 else:
     print("Cluster labels: not found — run python prepare_cluster_labels.py")
 
+# ── Cluster enrichment helper ─────────────────────────────────────────────────
+def _enrich_cluster_df(df_clustered):
+    """Add cluster_label, is_sar, is_fp, is_alerted, is_fn columns to df_clustered."""
+    df = df_clustered.copy()
+    cluster_vals = sorted(df["cluster"].unique())
+    label_map = {v: f"C{i+1}" for i, v in enumerate(cluster_vals)}
+    df["cluster_label"] = df["cluster"].map(label_map)
+    if DF_RULE_SWEEP is not None and "customer_id" in df.columns:
+        sar_map   = DF_RULE_SWEEP.groupby("customer_id")["is_sar"].max()
+        alerted   = set(DF_RULE_SWEEP["customer_id"].unique())
+        df["is_sar"]     = df["customer_id"].map(sar_map).fillna(0).astype(int)
+        df["is_alerted"] = df["customer_id"].isin(alerted).astype(int)
+        df["is_fp"]      = ((df["is_alerted"] == 1) & (df["is_sar"] == 0)).astype(int)
+        df["is_fn"]      = ((df["is_sar"] == 1)     & (df["is_alerted"] == 0)).astype(int)
+    else:
+        df["is_sar"] = df["is_alerted"] = df["is_fp"] = df["is_fn"] = 0
+    return df
+
+
+def _filter_treemap_node(node_id, df):
+    """Filter enriched df_clustered to the subset matching a treemap node_id."""
+    import re as _re
+    if not node_id or node_id in ("All", ""):
+        return df
+    if node_id == "SMALL":
+        return df
+    if not node_id.startswith("CL__"):
+        return df
+    inner = node_id[4:]
+    m = _re.match(r"^C(\d+):", inner)
+    if m:
+        c_num = int(m.group(1))
+        cluster_vals = sorted(df["cluster"].unique())
+        if 1 <= c_num <= len(cluster_vals):
+            df = df[df["cluster"] == cluster_vals[c_num - 1]]
+    if "__ct_" not in inner:
+        return df
+    _, ct_rest = inner.split("__ct_", 1)
+    ct_parts = ct_rest.split("__", 1)
+    ct = ct_parts[0]
+    if ct and "customer_type" in df.columns:
+        df = df[df["customer_type"] == ct]
+    if len(ct_parts) < 2:
+        return df
+    dim_val = ct_parts[1]
+    for col in sorted(df.columns, key=len, reverse=True):
+        prefix = col + "_"
+        if dim_val.startswith(prefix):
+            val = dim_val[len(prefix):]
+            df = df[df[col].astype(str) == val]
+            break
+    return df
+
+
+# ── Network graph builder ─────────────────────────────────────────────────────
+PATTERN_COLORS = {
+    "FAN-OUT":        "#e67e22",
+    "STRUCTURING":    "#f1c40f",
+    "LAYERING":       "#9b59b6",
+    "RAPID-MOVEMENT": "#e74c3c",
+    "NORMAL":         "#95a5a6",
+}
+
+def build_network_graph(customer_id):
+    """
+    Build a Plotly figure showing the transaction network for a given customer.
+    Returns (fig, feature_fig) — network graph and feature bar chart.
+    Returns (None, None) if no transaction data available.
+    """
+    import plotly.graph_objects as go
+    import networkx as nx
+    import math
+
+    if DF_TXN is None:
+        return None, None
+
+    all_txns = DF_TXN[DF_TXN["sender_customer_id"] == customer_id].copy()
+    if all_txns.empty:
+        return None, None
+
+    # Only show suspicious (non-NORMAL) transactions in the graph
+    txns = all_txns[all_txns["pattern_type"] != "NORMAL"].copy()
+    if txns.empty:
+        # Customer has no suspicious transactions — show a message
+        empty = go.Figure(layout=go.Layout(
+            paper_bgcolor="#1a1a1a", plot_bgcolor="#111",
+            font=dict(color="#eee"),
+            annotations=[dict(text="No suspicious transactions found for this customer.",
+                              showarrow=False, font=dict(size=13, color="#aaa"),
+                              xref="paper", yref="paper", x=0.5, y=0.5)],
+            xaxis=dict(visible=False), yaxis=dict(visible=False),
+        ))
+        return empty, None
+
+    # ── Build directed graph ──────────────────────────────────────────────────
+    G = nx.DiGraph()
+    sender_acct = str(txns["sender_account_id"].iloc[0])
+    G.add_node(sender_acct, node_type="sender", label="Customer\n…" + sender_acct[-4:])
+
+    for _, row in txns.iterrows():
+        dst  = str(row["receiver_account_id"])
+        bank = row["receiver_bank_name"]
+        pat  = row["pattern_type"]
+        amt  = row["amount"]
+        if not G.has_node(dst):
+            G.add_node(dst, node_type="receiver", label=bank + "\n…" + dst[-4:])
+        txn_id = str(row.get("txn_id", ""))
+        if G.has_edge(sender_acct, dst):
+            G[sender_acct][dst]["weight"]  += amt
+            G[sender_acct][dst]["count"]   += 1
+            G[sender_acct][dst]["txn_ids"].append(txn_id)
+        else:
+            G.add_edge(sender_acct, dst, weight=amt, count=1, pattern=pat,
+                       currency=row["currency"], bank=bank, txn_ids=[txn_id])
+
+    # ── Layout ────────────────────────────────────────────────────────────────
+    if len(G.nodes) <= 2:
+        pos = nx.shell_layout(G)
+    else:
+        pos = nx.spring_layout(G, seed=42, k=2.5 / math.sqrt(len(G.nodes)))
+
+    # ── Edge traces (one per pattern type for legend) ─────────────────────────
+    edge_groups = {}
+    for u, v, data in G.edges(data=True):
+        pat = data.get("pattern", "NORMAL")
+        if pat not in edge_groups:
+            edge_groups[pat] = {"x": [], "y": [], "widths": [], "texts": []}
+        x0, y0 = pos[u]
+        x1, y1 = pos[v]
+        edge_groups[pat]["x"] += [x0, x1, None]
+        edge_groups[pat]["y"] += [y0, y1, None]
+        txn_ids = data.get("txn_ids", [])
+        ids_str = ", ".join(txn_ids) if txn_ids else "—"
+        edge_groups[pat]["texts"].append(
+            f"<b>{data['bank']}</b><br>"
+            f"Pattern: {pat}<br>"
+            f"Amount: ${data['weight']:,.0f}  |  Txns: {data['count']}<br>"
+            f"Txn ID(s): {ids_str}"
+        )
+
+    edge_traces = []
+    for pat, eg in edge_groups.items():
+        color = PATTERN_COLORS.get(pat, "#aaa")
+        edge_traces.append(go.Scatter(
+            x=eg["x"], y=eg["y"],
+            mode="lines",
+            line=dict(width=2, color=color),
+            name=pat,
+            hoverinfo="none",
+            legendgroup=pat,
+        ))
+
+    # ── Node trace ────────────────────────────────────────────────────────────
+    node_x, node_y, node_text, node_hover, node_color, node_size = [], [], [], [], [], []
+    for node in G.nodes():
+        x, y = pos[node]
+        ntype = G.nodes[node].get("node_type", "receiver")
+        label = G.nodes[node].get("label", node[-6:])
+        node_x.append(x)
+        node_y.append(y)
+        node_text.append(label)
+        if ntype == "sender":
+            node_color.append("#2980b9")
+            node_size.append(22)
+            node_hover.append(f"<b>Customer Account</b><br>…{str(node)[-6:]}")
+        else:
+            out_deg = G.out_degree(node)
+            in_deg  = G.in_degree(node)
+            node_color.append("#c0392b" if in_deg > 1 else "#27ae60")
+            node_size.append(14 + min(in_deg * 3, 14))
+            node_hover.append(f"<b>{label}</b><br>Account: …{str(node)[-6:]}")
+
+    node_trace = go.Scatter(
+        x=node_x, y=node_y,
+        mode="markers+text",
+        marker=dict(size=node_size, color=node_color,
+                    line=dict(width=1, color="#fff")),
+        text=node_text,
+        textposition="top center",
+        textfont=dict(size=8),
+        hovertext=node_hover,
+        hoverinfo="text",
+        showlegend=False,
+    )
+
+    n_txns    = len(txns)           # suspicious only
+    n_rcv     = txns["receiver_account_id"].nunique()
+    total_amt = txns["amount"].sum()
+    n_total   = len(all_txns)       # all transactions including normal
+    patterns  = txns["pattern_type"].unique()
+    pat_str   = ", ".join(patterns) if len(patterns) else "None detected"
+
+    fig = go.Figure(
+        data=edge_traces + [node_trace],
+        layout=go.Layout(
+            title=dict(
+                text=f"Suspicious Transactions — {n_txns} flagged / {n_total} total | "
+                     f"{n_rcv} receivers | ${total_amt:,.0f}<br>"
+                     f"<sup>Patterns: {pat_str}  (normal transactions hidden)</sup>",
+                font=dict(size=13),
+            ),
+            showlegend=True,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            hovermode="closest",
+            margin=dict(l=20, r=20, t=80, b=20),
+            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+            plot_bgcolor="#111",
+            paper_bgcolor="#1a1a1a",
+            font=dict(color="#eee"),
+        ),
+    )
+
+    # ── Feature bar chart ─────────────────────────────────────────────────────
+    feat_fig = None
+    if DF_NET is not None and customer_id in DF_NET.index:
+        row     = DF_NET.loc[customer_id]
+        pop_med = DF_NET.median()
+        feat_cols = ["fan_out_score", "structuring_score", "txn_velocity",
+                     "cross_bank_ratio", "out_degree", "unique_banks_sent_to"]
+        feat_labels = {
+            "fan_out_score":       "Fan-Out Score",
+            "structuring_score":   "Structuring Score",
+            "txn_velocity":        "Txn Velocity",
+            "cross_bank_ratio":    "Cross-Border Ratio",
+            "out_degree":          "Receiver Count",
+            "unique_banks_sent_to":"Banks Used",
+        }
+        available = [c for c in feat_cols if c in row.index]
+        cust_vals = [row[c] for c in available]
+        med_vals  = [pop_med[c] for c in available]
+        labels    = [feat_labels.get(c, c) for c in available]
+
+        feat_fig = go.Figure()
+        feat_fig.add_trace(go.Bar(
+            name="This customer",
+            x=labels, y=cust_vals,
+            marker_color="#e74c3c",
+        ))
+        feat_fig.add_trace(go.Bar(
+            name="Population median",
+            x=labels, y=med_vals,
+            marker_color="#3498db",
+            opacity=0.6,
+        ))
+        feat_fig.update_layout(
+            barmode="group",
+            title=dict(text="Network Features vs. Population Median", font=dict(size=12)),
+            margin=dict(l=20, r=20, t=40, b=60),
+            legend=dict(orientation="h", y=1.12),
+            plot_bgcolor="#111",
+            paper_bgcolor="#1a1a1a",
+            font=dict(color="#eee", size=10),
+            xaxis=dict(tickangle=-30),
+            yaxis=dict(gridcolor="#333"),
+        )
+
+    return fig, feat_fig
+
+
 # ── Pre-populate cluster cache at startup ─────────────────────────────────────
 # Runs clustering once so alert-distribution charts work without the user
 # having to run "Cluster all customers" first.
@@ -95,6 +372,7 @@ if DF_SS is not None:
         _sc_fig, _sc_stats, _sc_df = lambda_ss_performance.perform_clustering(DF_SS, "All", 4)
         _startup_cluster_cache = {
             "df_clustered":  _sc_df,
+            "df_enriched":   _enrich_cluster_df(_sc_df),
             "scatter_fig":   _sc_fig,
             "stats":         _sc_stats,
             "customer_type": "All",
@@ -136,14 +414,16 @@ SUGGESTED_PROMPTS = [
 
 # ── Welcome message ───────────────────────────────────────────────────────────
 _WELCOME = (
-    f"Hello! I am your **FRAML AI Assistant** powered by **{OLLAMA_MODEL}** running locally via Ollama.\n\n"
+    f"Hello! I am your **AML AI Assistant** powered by **{OLLAMA_MODEL}**.\n\n"
     "I can help you with:\n"
     "- **Threshold tuning** — analyze how FP/FN trade-offs shift as alert thresholds change\n"
     "- **Smart segmentation** — cluster customers into behavioral segments using K-Means\n"
     "- **AML policy Q&A** — answer compliance questions from the knowledge base\n\n"
     f"Dataset loaded: **{_total:,} accounts** ({_biz_count:,} Business / {_ind_count:,} Individual) "
     f"| **{_alert_count:,} alerts** | **{_fp_count:,} false positives**\n\n"
-    "Click a suggested prompt on the left or type your question below."
+    "**Tip:** Use the sidebar buttons on the left to open the **SAR Priority Worklist** "
+    "(ranked alerts with network graph viewer) and **Segment Customer Drilldown**. "
+    "Click a suggested prompt below or type your question."
 )
 
 INITIAL_MESSAGES = [{"role": "assistant", "content": _WELCOME}]
@@ -458,6 +738,13 @@ def tool_executor(tool_name, tool_input):
         scatter_fig, stats, df_clustered = lambda_ss_performance.perform_clustering(
             df_src, customer_type, n_clusters
         )
+        _cluster_cache.update({
+            "df_clustered":  df_clustered,
+            "df_enriched":   _enrich_cluster_df(df_clustered),
+            "scatter_fig":   scatter_fig,
+            "stats":         stats,
+            "customer_type": customer_type,
+        })
         ss_dims = {
             "BUSINESS":   ["ACCOUNT_TYPE", "ACCOUNT_AGE_CATEGORY"],
             "INDIVIDUAL": ["ACCOUNT_TYPE", "GENDER", "AGE_CATEGORY", "INCOME_BAND"],
@@ -534,9 +821,10 @@ def tool_executor(tool_name, tool_input):
                 DF_SS, customer_type, n_clusters
             )
             _cluster_cache.update({
-                "df_clustered": df_clustered,
-                "scatter_fig":  scatter_fig,
-                "stats":        stats,
+                "df_clustered":  df_clustered,
+                "df_enriched":   _enrich_cluster_df(df_clustered),
+                "scatter_fig":   scatter_fig,
+                "stats":         stats,
                 "customer_type": customer_type,
             })
             treemap_fig  = lambda_ss_performance.smartseg_tree_dynamic(
@@ -734,6 +1022,26 @@ _sidebar = dbc.Card([
             color="outline-secondary",
             size="sm",
             disabled=True,
+            className="w-100 mb-2",
+        ),
+
+        # Segment drilldown — enabled after clustering
+        dbc.Button(
+            "Segment Customer Drilldown",
+            id="treemap-drilldown-btn",
+            color="outline-success",
+            size="sm",
+            disabled=False,
+            className="w-100 mb-2",
+        ),
+
+        # SAR priority worklist
+        dbc.Button(
+            "SAR Priority Worklist",
+            id="sar-worklist-btn",
+            color="danger",
+            size="sm",
+            disabled=_sar_scores_df is None,
             className="w-100",
         ),
     ])
@@ -751,17 +1059,52 @@ _chat_panel = html.Div([
     "overscrollBehaviorY": "contain",
 })
 
+_about_panel = dbc.Collapse(
+    dbc.Card(dbc.CardBody([
+        dbc.Row([
+            dbc.Col([
+                html.H6("What this demo does", className="fw-bold mb-2"),
+                html.Ul([
+                    html.Li("Threshold tuning — sweep FP/FN trade-offs as alert thresholds change"),
+                    html.Li("SAR backtest — test how many true SARs a threshold configuration catches"),
+                    html.Li("2D rule sweep — optimize two parameters with an interactive heatmap"),
+                    html.Li("Smart segmentation — cluster customers into behavioral groups using K-Means"),
+                    html.Li("AML policy Q&A — compliance questions answered from FFIEC, Wolfsberg, FinCEN docs"),
+                ], className="mb-0", style={"fontSize": "0.85rem"}),
+            ], width=6),
+            dbc.Col([
+                html.H6("How to use", className="fw-bold mb-2"),
+                html.P("Click a suggested prompt on the left or type your own question. "
+                       "The AI routes your request to the correct analytics tool, runs the computation, "
+                       "and returns results with charts.", style={"fontSize": "0.85rem"}),
+                html.H6("Tech stack", className="fw-bold mb-2"),
+                html.P("Fine-tuned Qwen 2.5 7B · Ollama · Plotly Dash · ChromaDB · scikit-learn",
+                       style={"fontSize": "0.85rem", "color": "#aaa"}),
+            ], width=6),
+        ]),
+    ]), className="mb-2 border-info"),
+    id="about-collapse",
+    is_open=False,
+)
+
 app.layout = dbc.Container([
     # Header
     dbc.Row([
         dbc.Col(
-            html.H4("FRAML AI — Threshold Tuning & Smart Segmentation",
+            html.H4("AML AI Assistant — Threshold Tuning & Smart Segmentation",
                     className="text-center my-3 fw-bold"),
-        )
-    ]),
+        ),
+        dbc.Col(
+            dbc.Button("About this demo", id="about-toggle", color="info",
+                       outline=True, size="sm", className="my-3 float-end"),
+            width="auto",
+        ),
+    ], align="center"),
+    _about_panel,
     # Body
     dbc.Row([
-        dbc.Col(_sidebar,    width=3, className="pe-2"),
+        dbc.Col(_sidebar,    width=3, className="pe-2",
+                style={"height": "calc(100vh - 80px)", "overflowY": "auto", "position": "sticky", "top": "0"}),
         dbc.Col(_chat_panel, width=9, className="ps-2"),
     ], className="g-0"),
 
@@ -769,6 +1112,7 @@ app.layout = dbc.Container([
     dcc.Store(id="pending-prompt", data=None),
     dcc.Store(id="scroll-dummy"),
     dcc.Store(id="last-2d-sweep-store", data=None),
+    dcc.Store(id="treemap-store", data=None),
     # One-shot interval to inject welcome message after page load
     dcc.Interval(id="welcome-interval", interval=300, max_intervals=1),
 
@@ -793,7 +1137,75 @@ app.layout = dbc.Container([
             ),
         ],
     ),
-], fluid=True, style={"height": "100vh", "overflow": "hidden"})
+    # ── SAR priority worklist offcanvas ──────────────────────────────────────
+    dbc.Offcanvas(
+        id="sar-worklist-offcanvas",
+        title="SAR Priority Worklist",
+        placement="end",
+        is_open=False,
+        style={"width": "70vw"},
+        children=[
+            # Model metrics
+            html.Div(id="sar-worklist-metrics", className="mb-3"),
+            # Threshold slider
+            html.Div([
+                html.Label("Minimum SAR Score threshold:", className="fw-semibold small mb-1"),
+                dcc.Slider(
+                    id="sar-threshold-slider",
+                    min=50, max=99, step=1, value=80,
+                    marks={50: "50%", 60: "60%", 70: "70%", 80: "80%", 90: "90%", 99: "99%"},
+                    tooltip={"placement": "bottom", "always_visible": True},
+                ),
+            ], className="mb-3"),
+            html.Hr(),
+            html.Div(id="sar-worklist-table"),
+        ],
+    ),
+
+    # ── Segment drilldown offcanvas ───────────────────────────────────────────
+    dbc.Offcanvas(
+        id="treemap-offcanvas",
+        title="Segment Customer Drilldown — Click any tile to see customers",
+        placement="end",
+        is_open=False,
+        style={"width": "65vw"},
+        children=[
+            dcc.Graph(
+                id="treemap-drilldown-graph",
+                config={"responsive": True},
+                style={"height": "400px"},
+            ),
+            html.Hr(),
+            html.Div(
+                "Click any tile above to see customers in that segment.",
+                id="treemap-customer-table",
+                style={"fontSize": "0.85rem", "overflowY": "auto", "maxHeight": "45vh"},
+            ),
+        ],
+    ),
+    # ── Network graph offcanvas ───────────────────────────────────────────────
+    dbc.Offcanvas(
+        id="network-graph-offcanvas",
+        title="Transaction Network Graph",
+        placement="end",
+        is_open=False,
+        style={"width": "72vw"},
+        children=[
+            html.Div(id="network-graph-customer-badge", className="mb-2"),
+            dcc.Graph(
+                id="network-graph-figure",
+                config={"responsive": True},
+                style={"height": "380px"},
+            ),
+            html.Hr(),
+            dcc.Graph(
+                id="network-feature-bar",
+                config={"responsive": True},
+                style={"height": "260px"},
+            ),
+        ],
+    ),
+], fluid=True, style={"minHeight": "100vh"})
 
 
 # ── Auto-scroll chat to bottom whenever messages update ───────────────────────
@@ -813,6 +1225,15 @@ app.clientside_callback(
 )
 
 # ── Callbacks ─────────────────────────────────────────────────────────────────
+
+@callback(
+    Output("about-collapse", "is_open"),
+    Input("about-toggle", "n_clicks"),
+    State("about-collapse", "is_open"),
+    prevent_initial_call=True,
+)
+def toggle_about(n_clicks, is_open):
+    return not is_open
 
 @callback(
     Output("chat-component", "messages", allow_duplicate=True),
@@ -844,6 +1265,7 @@ def queue_prompt(n_clicks_list):
 @callback(
     Output("chat-component", "messages"),
     Output("last-2d-sweep-store", "data"),
+    Output("treemap-store", "data"),
     Input("chat-component", "new_message"),
     Input("pending-prompt", "data"),
     State("chat-component", "messages"),
@@ -861,10 +1283,10 @@ def handle_chat(new_message, pending_prompt, messages):
         query    = new_message.get("content", "")
         user_msg = new_message
     else:
-        return messages, no_update
+        return messages, no_update, no_update
 
     if not query.strip():
-        return messages, no_update
+        return messages, no_update, no_update
 
     updated = messages + [user_msg]
 
@@ -880,7 +1302,7 @@ def handle_chat(new_message, pending_prompt, messages):
         import traceback
         traceback.print_exc()
         bot_response = {"role": "assistant", "content": f"Sorry, something went wrong: {e}"}
-        return updated + [bot_response], no_update
+        return updated + [bot_response], no_update, no_update
 
     # Parse DISPLAY_CLUSTERS directive and filter charts if present
     # Only honour the directive if the user actually asked to filter clusters
@@ -945,7 +1367,12 @@ def handle_chat(new_message, pending_prompt, messages):
     if _last_2d_state and any(tn == "rule_2d_sweep" for tn, _, _ in (chart_results or [])):
         sweep_store = {"ts": _last_2d_state.get("ts", 0)}
 
-    return updated + [bot_response], sweep_store
+    # Signal treemap store if a clustering tool just ran
+    treemap_store = no_update
+    if any(tn in ("cluster_analysis", "ss_cluster_analysis") for tn, _, _ in (chart_results or [])):
+        treemap_store = {"ts": time.time()}
+
+    return updated + [bot_response], sweep_store, treemap_store
 
 
 # ── Drill-down callbacks ──────────────────────────────────────────────────────
@@ -1059,5 +1486,318 @@ def drilldown_on_click(click_data):
     ])
 
 
+# ── Segment drilldown callbacks ───────────────────────────────────────────────
+
+@callback(
+    Output("treemap-drilldown-graph", "figure"),
+    Input("treemap-store", "data"),
+)
+def refresh_treemap_offcanvas(store_data):
+    """Re-render the treemap in the offcanvas whenever clustering runs."""
+    df_clustered = _cluster_cache.get("df_clustered")
+    if df_clustered is None:
+        return {}
+    ct = _cluster_cache.get("customer_type", "All")
+    ss_dims = {
+        "BUSINESS":   ["ACCOUNT_TYPE", "ACCOUNT_AGE_CATEGORY"],
+        "INDIVIDUAL": ["ACCOUNT_TYPE", "GENDER", "AGE_CATEGORY", "INCOME_BAND"],
+    }
+    fig = lambda_ss_performance.smartseg_tree_dynamic(
+        df_clustered, ct, dims=ss_dims, df_rule_sweep=DF_RULE_SWEEP
+    )
+    fig.update_layout(height=380, margin=dict(t=30, b=10, l=10, r=10))
+    return fig
+
+
+@callback(
+    Output("treemap-offcanvas", "is_open"),
+    Input("treemap-drilldown-btn", "n_clicks"),
+    State("treemap-offcanvas", "is_open"),
+    prevent_initial_call=True,
+)
+def toggle_treemap_offcanvas(n, is_open):
+    return not is_open
+
+
+@callback(
+    Output("treemap-customer-table", "children"),
+    Input("treemap-drilldown-graph", "clickData"),
+    prevent_initial_call=True,
+)
+def treemap_customer_drilldown(click_data):
+    """Show customer table for the clicked treemap tile."""
+    if not click_data or not _cluster_cache.get("df_enriched") is not None:
+        return "Click any tile above to see customers in that segment."
+
+    node_id = click_data["points"][0].get("id", "")
+    df = _filter_treemap_node(node_id, _cluster_cache["df_enriched"])
+
+    if df is None or len(df) == 0:
+        return html.P("No customers found for this segment.", className="text-muted small")
+
+    # Join SAR scores if available
+    if _sar_scores_df is not None and "customer_id" in df.columns:
+        sar_map = _sar_scores_df.set_index("customer_id")["sar_prob"]
+        df = df.copy()
+        df["sar_prob"] = df["customer_id"].map(sar_map)
+
+    # Build display columns
+    id_col   = next((c for c in ("customer_id", "CUSTOMER_ID", "cust_id") if c in df.columns), None)
+    show_cols = []
+    if id_col:
+        show_cols.append(id_col)
+    for c in ("customer_type", "cluster_label"):
+        if c in df.columns:
+            show_cols.append(c)
+    if "sar_prob" in df.columns:
+        show_cols.append("sar_prob")
+    for c in ("is_alerted", "is_fp", "is_fn", "is_sar"):
+        if c in df.columns:
+            show_cols.append(c)
+
+    display_df = df[show_cols].copy().head(500)
+    rename_map = {
+        "is_alerted":  "Alerted",
+        "is_fp":       "False Positive",
+        "is_fn":       "False Negative",
+        "is_sar":      "SAR",
+        "sar_prob":    "SAR Score",
+        "cluster_label": "Cluster",
+        "customer_type": "Type",
+    }
+    display_df = display_df.rename(columns=rename_map)
+    for col in ("Alerted", "False Positive", "False Negative", "SAR"):
+        if col in display_df.columns:
+            display_df[col] = display_df[col].map({1: "Yes", 0: "No"})
+    if "SAR Score" in display_df.columns:
+        display_df["SAR Score"] = (display_df["SAR Score"] * 100).round(1).astype(str) + "%"
+
+    n_sar = int(df["is_sar"].sum())   if "is_sar"     in df.columns else 0
+    n_fp  = int(df["is_fp"].sum())    if "is_fp"      in df.columns else 0
+    n_fn  = int(df["is_fn"].sum())    if "is_fn"      in df.columns else 0
+    n_alt = int(df["is_alerted"].sum()) if "is_alerted" in df.columns else 0
+
+    header = html.Div([
+        html.P(
+            f"Segment: {node_id or 'All'} — {len(df):,} customers"
+            + (f" (showing first 500)" if len(df) > 500 else ""),
+            className="fw-bold mb-1 small",
+        ),
+        html.Div([
+            dbc.Badge(f"Alerted: {n_alt}", color="warning",   className="me-1"),
+            dbc.Badge(f"FP: {n_fp}",       color="danger",    className="me-1"),
+            dbc.Badge(f"FN: {n_fn}",       color="secondary", className="me-1"),
+            dbc.Badge(f"SAR: {n_sar}",     color="success",   className="me-1"),
+        ], className="mb-2"),
+    ])
+
+    table = dash_table.DataTable(
+        data=display_df.to_dict("records"),
+        columns=[{"name": c, "id": c} for c in display_df.columns],
+        style_table={"overflowX": "auto", "overflowY": "auto", "maxHeight": "38vh"},
+        style_cell={"fontSize": "0.78rem", "padding": "3px 6px", "textAlign": "left"},
+        style_header={"fontWeight": "bold", "backgroundColor": "#f8f9fa"},
+        filter_action="native",
+        sort_action="native",
+        page_size=50,
+    )
+
+    return html.Div([header, table])
+
+
+# ── SAR worklist callbacks ────────────────────────────────────────────────────
+
+@callback(
+    Output("sar-worklist-offcanvas", "is_open"),
+    Input("sar-worklist-btn", "n_clicks"),
+    State("sar-worklist-offcanvas", "is_open"),
+    prevent_initial_call=True,
+)
+def toggle_sar_worklist(n, is_open):
+    return not is_open
+
+
+@callback(
+    Output("sar-worklist-metrics", "children"),
+    Output("sar-worklist-table", "children"),
+    Input("sar-threshold-slider", "value"),
+)
+def update_sar_worklist(threshold_pct):
+    if _sar_scores_df is None:
+        return html.P("SAR scorer not available.", className="text-muted"), ""
+
+    threshold = threshold_pct / 100.0
+    df        = _sar_scores_df.copy()
+
+    # Join cluster info if available
+    if _cluster_cache.get("df_enriched") is not None and "customer_id" in df.columns:
+        cl_df = _cluster_cache["df_enriched"][["customer_id", "cluster_label"]].drop_duplicates("customer_id")
+        df    = df.merge(cl_df, on="customer_id", how="left")
+
+    total_alerts  = len(df)
+    above_thresh  = df[df["sar_prob"] >= threshold]
+    n_above       = len(above_thresh)
+    reduction_pct = round(100 * (1 - n_above / total_alerts), 1) if total_alerts > 0 else 0
+    n_sar_caught  = int(above_thresh["is_sar"].sum()) if "is_sar" in above_thresh.columns else 0
+    n_sar_total   = int(df["is_sar"].sum())           if "is_sar" in df.columns else 0
+    sar_recall    = round(100 * n_sar_caught / n_sar_total, 1) if n_sar_total > 0 else 0
+
+    metrics = html.Div([
+        dbc.Row([
+            dbc.Col(dbc.Card(dbc.CardBody([
+                html.P("Model ROC-AUC", className="text-muted small mb-1"),
+                html.H5(f"{_sar_roc_auc:.3f}", className="fw-bold text-info mb-0"),
+            ]), className="text-center"), width=3),
+            dbc.Col(dbc.Card(dbc.CardBody([
+                html.P("Alerts to Investigate", className="text-muted small mb-1"),
+                html.H5(f"{n_above:,} / {total_alerts:,}", className="fw-bold text-warning mb-0"),
+            ]), className="text-center"), width=3),
+            dbc.Col(dbc.Card(dbc.CardBody([
+                html.P("Workload Reduction", className="text-muted small mb-1"),
+                html.H5(f"{reduction_pct}%", className="fw-bold text-success mb-0"),
+            ]), className="text-center"), width=3),
+            dbc.Col(dbc.Card(dbc.CardBody([
+                html.P("SAR Recall", className="text-muted small mb-1"),
+                html.H5(f"{sar_recall}%", className="fw-bold text-danger mb-0"),
+            ]), className="text-center"), width=3),
+        ], className="g-2"),
+    ])
+
+    # Build display table
+    show_cols = []
+    for c in ("customer_id", "customer_type", "cluster_label"):
+        if c in above_thresh.columns: show_cols.append(c)
+    show_cols.append("sar_prob")
+    for c in ("alert_count", "rule_count", "max_z_score", "avg_weekly_trxn_amt", "trxn_amt_monthly", "is_sar"):
+        if c in above_thresh.columns: show_cols.append(c)
+
+    display_df = above_thresh[show_cols].copy().head(1000)
+    display_df["sar_prob"] = (display_df["sar_prob"] * 100).round(1).astype(str) + "%"
+    rename = {
+        "sar_prob":           "SAR Score",
+        "customer_type":      "Type",
+        "cluster_label":      "Cluster",
+        "alert_count":        "Alerts",
+        "rule_count":         "Rules Triggered",
+        "max_z_score":        "Max Z-Score",
+        "avg_weekly_trxn_amt":"Avg Weekly Amt",
+        "trxn_amt_monthly":   "Monthly Amt",
+        "is_sar":             "Known SAR",
+        "customer_id":        "Customer ID",
+    }
+    display_df = display_df.rename(columns=rename)
+    if "Known SAR" in display_df.columns:
+        display_df["Known SAR"] = display_df["Known SAR"].map({1: "Yes", 0: "No"})
+    for col in ("Avg Weekly Amt", "Monthly Amt"):
+        if col in display_df.columns:
+            display_df[col] = display_df[col].apply(lambda v: f"${v:,.0f}" if pd.notna(v) else "")
+
+    COL_TOOLTIPS = {
+        "Customer ID":    "Unique identifier for the customer account under review.",
+        "Type":           "Customer segment: INDIVIDUAL or BUSINESS.",
+        "Cluster":        "Behavioral cluster assigned by K-Means segmentation (C1, C2, …).",
+        "SAR Score":      "SAR propensity score (0–100%) from the Random Forest model. "
+                          "Higher = more likely to warrant a SAR filing. "
+                          "Trained on alert, rule, transaction, and network graph features.",
+        "Alerts":         "Total number of AML alerts generated for this customer across all rules.",
+        "Rules Triggered":"Number of distinct monitoring rules that fired for this customer.",
+        "Max Z-Score":    "Highest z-score across all alert rules that fired. "
+                          "Measures how many standard deviations above the segment mean "
+                          "the customer's behavior falls on the worst-scoring rule.",
+        "Avg Weekly Amt": "Average per-transaction dollar amount (USD). "
+                          "Reflects the typical size of a single transaction for this customer.",
+        "Monthly Amt":    "Total transaction volume (USD) summed across all transactions in the monitored month. "
+                          "Not an average — a high value means high overall activity.",
+        "Known SAR":      "Ground-truth label: Yes = a SAR was actually filed for this customer "
+                          "(used for model training and recall measurement).",
+    }
+
+    table = dash_table.DataTable(
+        id="sar-worklist-datatable",
+        data=display_df.to_dict("records"),
+        columns=[{"name": c, "id": c} for c in display_df.columns],
+        tooltip_header={c: COL_TOOLTIPS[c] for c in display_df.columns if c in COL_TOOLTIPS},
+        tooltip_delay=0,
+        tooltip_duration=None,
+        style_table={"overflowX": "auto", "overflowY": "auto", "maxHeight": "55vh"},
+        style_cell={"fontSize": "0.78rem", "padding": "3px 8px", "textAlign": "left"},
+        style_header={"fontWeight": "bold", "backgroundColor": "#f8f9fa",
+                      "textDecoration": "underline dotted", "cursor": "help"},
+        style_data_conditional=[
+            {"if": {"filter_query": '{Known SAR} = "Yes"'},
+             "backgroundColor": "#fff3cd", "fontWeight": "bold"},
+        ],
+        filter_action="native",
+        sort_action="native",
+        sort_by=[{"column_id": "SAR Score", "direction": "desc"}],
+        page_size=50,
+    )
+
+    return metrics, html.Div([
+        html.P(
+            f"Showing {min(n_above, 1000):,} of {n_above:,} alerts at or above {threshold_pct}% threshold"
+            + (" (capped at 1,000 rows)" if n_above > 1000 else ""),
+            className="text-muted small mb-2",
+        ),
+        table,
+    ])
+
+
+@callback(
+    Output("network-graph-offcanvas",    "is_open"),
+    Output("network-graph-figure",       "figure"),
+    Output("network-feature-bar",        "figure"),
+    Output("network-graph-customer-badge", "children"),
+    Input("sar-worklist-datatable",      "active_cell"),
+    State("sar-worklist-datatable",      "data"),
+    State("network-graph-offcanvas",     "is_open"),
+    prevent_initial_call=True,
+)
+def show_network_graph(active_cell, table_data, is_open):
+    import plotly.graph_objects as go
+
+    _empty = go.Figure(layout=go.Layout(
+        paper_bgcolor="#1a1a1a", plot_bgcolor="#111",
+        font=dict(color="#eee"),
+        xaxis=dict(visible=False), yaxis=dict(visible=False),
+        annotations=[dict(text="No data available", showarrow=False,
+                          font=dict(size=14, color="#aaa"), xref="paper", yref="paper", x=0.5, y=0.5)],
+    ))
+
+    if not active_cell or not table_data:
+        return no_update, no_update, no_update, no_update
+
+    row      = table_data[active_cell["row"]]
+    cid_key  = next((k for k in row if "customer" in k.lower() and "id" in k.lower()), None)
+    if cid_key is None:
+        return no_update, no_update, no_update, no_update
+
+    customer_id = row[cid_key]
+    sar_score   = row.get("SAR Score", "—")
+    cust_type   = row.get("Type", "")
+    cluster     = row.get("Cluster", "")
+    known_sar   = row.get("Known SAR", "")
+
+    badge = html.Div([
+        dbc.Badge(f"Customer: {customer_id}", color="primary", className="me-2"),
+        dbc.Badge(f"SAR Score: {sar_score}",  color="danger",  className="me-2"),
+        dbc.Badge(cust_type,                  color="secondary", className="me-2") if cust_type else None,
+        dbc.Badge(cluster,                    color="info",    className="me-2") if cluster else None,
+        dbc.Badge("Known SAR" if known_sar == "Yes" else "Not filed",
+                  color="warning" if known_sar == "Yes" else "success", className="me-2"),
+        html.Small(" Click any row in the worklist to view its network graph.",
+                   className="text-muted ms-2"),
+    ], className="d-flex align-items-center flex-wrap")
+
+    net_fig, feat_fig = build_network_graph(customer_id)
+
+    if net_fig is None:
+        net_fig = _empty
+    if feat_fig is None:
+        feat_fig = _empty
+
+    return True, net_fig, feat_fig, badge
+
+
 if __name__ == "__main__":
-    app.run(debug=False, port=5000, use_reloader=False)
+    app.run(debug=False, port=7860, host="0.0.0.0", use_reloader=False)

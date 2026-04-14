@@ -116,7 +116,7 @@ def plot_thresholds_tuning(df_segment, threshold, bump_pct, segment):
         showarrow=False, align="right", valign="middle"
     )
     df_thresholds = pd.DataFrame({f'{threshold}': thresholds, 'False Positives': false_positives, 'False Negatives': false_negatives})
-    df_thresholds.to_csv(f"Segment_{segment}_{threshold}.csv", index=False)
+    df_thresholds.to_csv(os.path.join("/tmp", f"Segment_{segment}_{threshold}.csv"), index=False)
     return fig, df_segment
 def smartseg_tree():
     dtree = pd.read_csv('smartsegments.csv')

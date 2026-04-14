@@ -568,7 +568,7 @@ def cluster_profile_table(df_clustered, target_cluster):
     """
     numeric_cols = [c for c in [
         "avg_weekly_trxn_amt", "trxn_amt_monthly",
-        "CURRENT_BALANCE", "ACCT_AGE_YEARS", "AGE",
+        "CURRENT_BALANCE", "ACCT_AGE_YEARS",
     ] if c in df_clustered.columns]
 
     rows = []
@@ -644,10 +644,11 @@ def cluster_stats_table(df_clustered, customer_type="All"):
     Summary table of all cluster stats — replaces the hard-to-read text block.
     df_clustered has 0-indexed cluster labels; display as 1-indexed.
     """
+    age_cols = [] if customer_type.upper() == "BUSINESS" else ["AGE"]
     numeric_cols = [c for c in [
         "avg_weekly_trxn_amt", "trxn_amt_monthly",
-        "CURRENT_BALANCE", "ACCT_AGE_YEARS", "AGE",
-    ] if c in df_clustered.columns]
+        "CURRENT_BALANCE", "ACCT_AGE_YEARS",
+    ] + age_cols if c in df_clustered.columns]
 
     total_n = len(df_clustered)
 
