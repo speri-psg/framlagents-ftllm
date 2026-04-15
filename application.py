@@ -1,5 +1,5 @@
 """
-application.py — FRAML AI Assistant (Qwen2.5 via Ollama)
+application.py — ARIA (Qwen2.5 via Ollama)
 
 Run:
     python application.py        # http://127.0.0.1:5000
@@ -31,6 +31,7 @@ from config import ALERTS_CSV, SS_CSV, SAR_CSV, CLUSTER_LABELS_CSV, OLLAMA_MODEL
 from agents import OrchestratorAgent
 import lambda_ss_performance
 import lambda_rule_analysis
+import lambda_ofac
 import make_figures
 
 MAX_SWEEP_ROWS = 10  # max sweep points passed to model (prevents token limit cutoff)
@@ -402,7 +403,7 @@ SUGGESTED_PROMPTS = [
     "Show FP/FN trade-off for Business customers by monthly transaction amount",
     "Run SAR backtest for Individual customers using average weekly transactions",
     "What is the crossover threshold for Business customers on average transaction amount?",
-    # Smart Segmentation
+    # Dynamic Segmentation
     "Cluster Business customers by transaction behavior",
     "Show me the behavioral segments for Individual customers",
     "Which cluster of Business customers has the highest transaction volume?",
@@ -414,10 +415,10 @@ SUGGESTED_PROMPTS = [
 
 # ── Welcome message ───────────────────────────────────────────────────────────
 _WELCOME = (
-    f"Hello! I am your **AML AI Assistant** powered by **{OLLAMA_MODEL}**.\n\n"
+    f"Hello! I'm **ARIA** — Agentic Risk Intelligence for AML — powered by **{OLLAMA_MODEL}**.\n\n"
     "I can help you with:\n"
     "- **Threshold tuning** — analyze how FP/FN trade-offs shift as alert thresholds change\n"
-    "- **Smart segmentation** — cluster customers into behavioral segments using K-Means\n"
+    "- **Dynamic Segmentation** — cluster customers into behavioral segments using K-Means\n"
     "- **AML policy Q&A** — answer compliance questions from the knowledge base\n\n"
     f"Dataset loaded: **{_total:,} accounts** ({_biz_count:,} Business / {_ind_count:,} Individual) "
     f"| **{_alert_count:,} alerts** | **{_fp_count:,} false positives**\n\n"
@@ -478,58 +479,40 @@ def compute_threshold_stats(df_seg, threshold):
     # ── Build pre-written factual interpretation ──────────────────────────────
     lines = ["=== PRE-COMPUTED ANALYSIS (copy this verbatim, do not alter numbers) ==="]
 
-    # FP behaviour
-    lines.append(
-        f"At the lowest threshold ({t_min}), there are {max_fp} false positives."
-    )
-    lines.append(
-        f"False positives decrease as the threshold rises."
-    )
-    if fp_first_zero:
-        lines.append(f"False positives reach zero at threshold {fp_first_zero[0]}.")
-    else:
-        lines.append(f"False positives do not reach zero within the threshold range ({t_min}–{t_max}).")
+    lines.append(f"### Threshold Tuning — False Positive / False Negative Trade-off\n")
 
-    # FN behaviour
+    lines.append(f"**False Positives (FP)**")
+    lines.append(f"- At the lowest threshold ({t_min}): **{max_fp} FPs**")
+    if fp_first_zero:
+        lines.append(f"- FPs reach zero at threshold **{fp_first_zero[0]}**")
+    else:
+        lines.append(f"- FPs do not reach zero within the sweep range ({t_min}–{t_max})")
+    lines.append("")
+
+    lines.append(f"**False Negatives (FN)**")
     if fn_first_nonzero:
         if fn_zero_end > t_min:
-            lines.append(
-                f"False negatives are zero for all thresholds from {t_min} up to and including {fn_zero_end}."
-            )
+            lines.append(f"- FNs are zero from threshold {t_min} up to **{fn_zero_end}**")
         else:
-            lines.append(
-                f"False negatives are already non-zero at the lowest sweep threshold ({t_min}), "
-                f"meaning some customers fall below the sweep floor."
-            )
-        lines.append(
-            f"False negatives first become non-zero at threshold {fn_first_nonzero[0]} (FN={fn_first_nonzero[1]})."
-        )
-        lines.append(
-            f"False negatives increase as the threshold continues to rise, "
-            f"reaching {max_fn} at the highest threshold ({t_last})."
-        )
+            lines.append(f"- FNs are non-zero even at the lowest threshold ({t_min}) — some customers fall below the sweep floor")
+        lines.append(f"- FNs first appear at threshold **{fn_first_nonzero[0]}** (FN={fn_first_nonzero[1]})")
+        lines.append(f"- FNs reach **{max_fn}** at the highest threshold ({t_last})")
     else:
-        lines.append(f"False negatives remain zero across the entire threshold range.")
+        lines.append(f"- FNs remain zero across the entire sweep range")
+    lines.append("")
 
-    # Crossover
-    lines.append(
-        f"The crossover point — where false positives and false negatives are closest — "
-        f"is at threshold {crossover[0]} (FP={crossover[1]}, FN={crossover[2]})."
-    )
+    lines.append(f"**Crossover Point** — threshold **{crossover[0]}** (FP={crossover[1]}, FN={crossover[2]})")
+    lines.append("")
 
-    # Optimal zone
     if optimal:
         lines.append(
-            f"The optimal zone (both FP and FN below 20% of their respective maximums) "
-            f"spans threshold {optimal[0][0]} to {optimal[-1][0]}."
+            f"**Optimal Zone** (FP and FN both below 20% of max): threshold **{optimal[0][0]}** to **{optimal[-1][0]}**"
         )
     else:
-        lines.append(
-            "No single threshold achieves both FP and FN below 20% of their maximums simultaneously."
-        )
+        lines.append("**Optimal Zone**: no single threshold achieves both FP and FN below 20% of their maximums simultaneously.")
 
+    lines.append("\n*(Detailed sweep chart shown below.)*")
     lines.append("=== END PRE-COMPUTED ANALYSIS ===")
-    lines.append("(Detailed sweep table shown in the chart below.)")
 
     return "\n".join(lines)
 
@@ -538,6 +521,7 @@ def compute_segment_stats(df):
     total_alerts = int(df["alerts"].sum())
     total_accounts = len(df)
     lines = ["=== PRE-COMPUTED SEGMENT STATS (copy verbatim, do not compute new numbers) ==="]
+    lines.append("### Segment Overview\n")
     for seg_id, name in [(0, "Business"), (1, "Individual")]:
         seg = df[df["smart_segment_id"] == seg_id]
         n         = len(seg)
@@ -547,11 +531,12 @@ def compute_segment_stats(df):
         fp_rate   = round(100 * fp / alerts, 1) if alerts > 0 else 0
         acct_pct  = round(100 * n / total_accounts, 1) if total_accounts > 0 else 0
         alert_pct = round(100 * alerts / total_alerts, 1) if total_alerts > 0 else 0
-        lines.append(
-            f"{name}: accounts={n:,} ({acct_pct}% of total), "
-            f"alerts={alerts:,} ({alert_pct}% of all alerts), "
-            f"FP={fp:,} (FP rate={fp_rate}% of alerts), FN={fn:,}"
-        )
+        lines.append(f"**{name}**")
+        lines.append(f"- Accounts: **{n:,}** ({acct_pct}% of total)")
+        lines.append(f"- Alerts: **{alerts:,}** ({alert_pct}% of all alerts)")
+        lines.append(f"- False Positives: **{fp:,}** (FP rate={fp_rate}% of alerts)")
+        lines.append(f"- False Negatives: **{fn:,}**")
+        lines.append("")
     lines.append("=== END PRE-COMPUTED SEGMENT STATS ===")
     return "\n".join(lines)
 
@@ -597,30 +582,31 @@ def compute_sar_backtest(df_sar_seg, sar_col, segment_name):
     first_miss = next(((t, c, m) for t, c, m in sweep if m > 0), None)
 
     lines = ["=== PRE-COMPUTED SAR BACKTEST (copy this verbatim, do not alter numbers) ==="]
-    lines.append(f"Segment: {segment_name} | Column: {sar_col}")
-    lines.append(f"Total simulated SARs: {total_sars} out of {total_alerted} alerted customers ({round(100*total_sars/total_alerted,1)}% SAR filing rate).")
-    lines.append("")
 
-    lines.append(f"At the lowest threshold ({sweep[0][0]}): {sweep[0][1]} SARs caught (100.0%), 0 missed.")
+    lines.append(f"### SAR Backtest — {segment_name} / {sar_col}\n")
+    lines.append(f"**Population:** {total_alerted:,} alerted customers | **SARs:** {total_sars:,} ({round(100*total_sars/total_alerted,1)}% SAR filing rate)\n")
+
+    lines.append(f"**Sweep Results**")
+    lines.append(f"- At lowest threshold ({sweep[0][0]}): **{sweep[0][1]} SARs caught** (100%), 0 missed")
     if first_miss:
-        lines.append(f"SARs first begin to be missed at threshold {first_miss[0]} ({first_miss[2]} missed).")
+        lines.append(f"- SARs first missed at threshold **{first_miss[0]}** ({first_miss[2]} missed)")
 
     if t90:
         prev = next((s for s in reversed(sweep) if s[0] < t90[0] and s[1] > int(total_sars*0.90)), None)
         t90_keep = prev[0] if prev else sweep[0][0]
-        lines.append(f"To catch at least 90% of SARs, threshold must stay at or below {t90_keep} ({int(total_sars*0.90)+1} of {total_sars} caught).")
+        lines.append(f"- To keep ≥90% SAR catch rate: threshold ≤ **{t90_keep}** ({int(total_sars*0.90)+1} of {total_sars} caught)")
     if t80:
         prev = next((s for s in reversed(sweep) if s[0] < t80[0] and s[1] > int(total_sars*0.80)), None)
         t80_keep = prev[0] if prev else sweep[0][0]
-        lines.append(f"To catch at least 80% of SARs, threshold must stay at or below {t80_keep} ({int(total_sars*0.80)+1} of {total_sars} caught).")
+        lines.append(f"- To keep ≥80% SAR catch rate: threshold ≤ **{t80_keep}** ({int(total_sars*0.80)+1} of {total_sars} caught)")
     if t50:
         prev = next((s for s in reversed(sweep) if s[0] < t50[0] and s[1] > int(total_sars*0.50)), None)
         t50_keep = prev[0] if prev else sweep[0][0]
-        lines.append(f"To catch at least 50% of SARs, threshold must stay at or below {t50_keep} ({int(total_sars*0.50)+1} of {total_sars} caught).")
+        lines.append(f"- To keep ≥50% SAR catch rate: threshold ≤ **{t50_keep}** ({int(total_sars*0.50)+1} of {total_sars} caught)")
 
-    lines.append(f"At the highest threshold ({sweep[-1][0]}): {sweep[-1][1]} SARs caught, {sweep[-1][2]} missed (100.0% missed).")
+    lines.append(f"- At highest threshold ({sweep[-1][0]}): **{sweep[-1][1]} caught**, {sweep[-1][2]} missed")
+    lines.append("\n*(Detailed sweep chart shown below.)*")
     lines.append("=== END PRE-COMPUTED SAR BACKTEST ===")
-    lines.append("(Detailed sweep table shown in the chart below.)")
 
     return "\n".join(lines)
 
@@ -691,6 +677,7 @@ def tool_executor(tool_name, tool_input):
         df_sweep    = _filter_by_cluster(DF_RULE_SWEEP, cluster)
         text, grid  = lambda_rule_analysis.compute_rule_2d_sweep(df_sweep, risk_factor, param1, param2)
         heatmap     = make_figures.rule_2d_heatmap(grid) if grid else None
+        ranked_tbl  = make_figures.rule_2d_ranked_table(grid) if grid else None
         if grid:
             _last_2d_state.update({
                 "grid":        grid,
@@ -706,8 +693,10 @@ def tool_executor(tool_name, tool_input):
                 DF_RULE_SWEEP, DF_CLUSTER_LABELS, grid["rf_name"] if grid else risk_factor, cluster
             )
             if dist_fig is not None:
-                return text, (heatmap, dist_fig)
-        return text, heatmap
+                figs = [f for f in [heatmap, ranked_tbl, dist_fig] if f is not None]
+                return text, tuple(figs)
+        figs = [f for f in [heatmap, ranked_tbl] if f is not None]
+        return text, tuple(figs) if len(figs) > 1 else (figs[0] if figs else None)
 
     elif tool_name == "list_rules":
         if DF_RULE_SWEEP is None:
@@ -834,6 +823,10 @@ def tool_executor(tool_name, tool_input):
             figs = (stats_table, scatter_fig, treemap_fig) if stats_table is not None else (scatter_fig, treemap_fig)
             return stats, figs
 
+    elif tool_name == "ofac_screening":
+        filter_type = tool_input.get("filter_type", "all")
+        return lambda_ofac.ofac_screening(filter_type=filter_type)
+
     return f"Unknown tool: {tool_name}", None
 
 
@@ -879,11 +872,15 @@ def _chart_content(tool_name, tool_input, fig):
             if p2 is None: p2 = d2
         cluster_tag = f" [Cluster {cluster}]" if cluster else ""
         if isinstance(fig, tuple):
-            figs   = list(fig)
-            labels = [
-                f"2D Sweep — {rf} ({p1 or '?'} x {p2 or '?'}){cluster_tag}",
-                f"{rf} — Alerts by Cluster",
+            figs = list(fig)
+            # Label each figure by type: heatmap, ranked table, cluster dist
+            base_labels = [
+                f"2D Sweep Heatmap — {rf}{cluster_tag}",
+                f"2D Sweep Ranked Table — {rf}{cluster_tag}",
             ]
+            if len(figs) > 2:
+                base_labels.append(f"{rf} — Alerts by Cluster")
+            labels = base_labels[:len(figs)]
         else:
             figs   = [fig]
             labels = [f"2D Sweep — {rf} ({p1 or '?'} x {p2 or '?'}){cluster_tag}"]
@@ -899,6 +896,11 @@ def _chart_content(tool_name, tool_input, fig):
         cluster_tag = f" [Cluster {cluster}]" if cluster else ""
         figs   = [fig]
         labels = [f"Rule SAR Sweep — {rf} / {sp or 'default'}{cluster_tag}"]
+
+    elif tool_name == "ofac_screening":
+        blocks.append({"type": "text",  "content": "### OFAC Sanctions Screening"})
+        blocks.append({"type": "graph", "figure": fig})
+        return blocks
 
     elif tool_name in ("cluster_analysis", "ss_cluster_analysis"):
         ct     = tool_input.get("customer_type", "All")
@@ -938,13 +940,13 @@ app = Dash(
     server=server,
     routes_pathname_prefix="/",
     external_stylesheets=[dbc.themes.BOOTSTRAP],
-    title="FRAML AI Assistant",
+    title="ARIA",
 )
 
 # ── Layout ────────────────────────────────────────────────────────────────────
 _sidebar = dbc.Card([
     dbc.CardBody([
-        html.H5("FRAML AI Assistant", className="fw-bold mb-1"),
+        html.H5("ARIA", className="fw-bold mb-1"),
         html.P("Powered by Qwen2.5 via Ollama", className="text-muted small mb-3"),
 
         html.Hr(className="my-2"),
@@ -976,7 +978,7 @@ _sidebar = dbc.Card([
                 ),
                 dcc.Clipboard(content=p, title="Copy", style={"cursor": "pointer", "paddingTop": "2px"}),
             ], className="d-flex align-items-start gap-1 mb-2") for i, p in enumerate(SUGGESTED_PROMPTS[:3])],
-            *[html.Span("Smart Segmentation", className="text-muted d-block mb-1 mt-1 small fst-italic")],
+            *[html.Span("Dynamic Segmentation", className="text-muted d-block mb-1 mt-1 small fst-italic")],
             *[html.Div([
                 dbc.Button(
                     p,
@@ -1051,7 +1053,7 @@ _chat_panel = html.Div([
     ChatComponent(
         id="chat-component",
         messages=[],
-        class_name="FRAML AI",
+        class_name="AML AI",
     )
 ], id="chat-scroll-container", style={
     "height": "calc(100vh - 80px)",
@@ -1068,7 +1070,7 @@ _about_panel = dbc.Collapse(
                     html.Li("Threshold tuning — sweep FP/FN trade-offs as alert thresholds change"),
                     html.Li("SAR backtest — test how many true SARs a threshold configuration catches"),
                     html.Li("2D rule sweep — optimize two parameters with an interactive heatmap"),
-                    html.Li("Smart segmentation — cluster customers into behavioral groups using K-Means"),
+                    html.Li("Dynamic Segmentation — cluster customers into behavioral groups using K-Means"),
                     html.Li("AML policy Q&A — compliance questions answered from FFIEC, Wolfsberg, FinCEN docs"),
                 ], className="mb-0", style={"fontSize": "0.85rem"}),
             ], width=6),
@@ -1091,7 +1093,7 @@ app.layout = dbc.Container([
     # Header
     dbc.Row([
         dbc.Col(
-            html.H4("AML AI Assistant — Threshold Tuning & Smart Segmentation",
+            html.H4("ARIA — Threshold Tuning & Dynamic Segmentation",
                     className="text-center my-3 fw-bold"),
         ),
         dbc.Col(
@@ -1290,6 +1292,28 @@ def handle_chat(new_message, pending_prompt, messages):
 
     updated = messages + [user_msg]
 
+    # ── Help intent interception (before hitting the model) ──────────────────
+    _help_pattern = re.compile(
+        r'\b(what can you (do|help|assist)|what (features?|capabilities|tools?|functions?) (do you|does this|are)|'
+        r'help me|show me what|how do (i|you)|what is this tool|what does this (app|tool|system)|'
+        r'^help$)\b',
+        re.IGNORECASE
+    )
+    if _help_pattern.search(query):
+        help_text = (
+            "Here's what I can help you with:\n\n"
+            "1. **Threshold Tuning** — FP/FN trade-off analysis across alert thresholds by segment and transaction feature\n"
+            "2. **SAR Backtest** — see how many SARs a specific rule catches at different thresholds\n"
+            "3. **2D Sweep** — optimize two rule parameters simultaneously\n"
+            "4. **Customer Segmentation** — K-Means clustering by transaction behavior (Business or Individual)\n"
+            "5. **SAR Priority Worklist** — ranked list of SAR candidates by propensity score (red button in the sidebar)\n"
+            "6. **Transaction Network Graph** — click any worklist row to see a customer's money flow network\n"
+            "7. **AML Policy Q&A** — compliance questions answered from the regulatory knowledge base\n\n"
+            "Try a prompt like: *'Show FP/FN trade-off for Business customers'* or *'Run SAR backtest for Activity Deviation ACH rule'*"
+        )
+        bot_response = {"role": "assistant", "content": help_text}
+        return updated + [bot_response], no_update, no_update
+
     try:
         global _current_query
         _current_query = query
@@ -1339,7 +1363,9 @@ def handle_chat(new_message, pending_prompt, messages):
                               {"customer_type": customer_type, "filter_clusters": filter_nums},
                               (filtered_scatter, treemap_fig))]
     # Strip DISPLAY_CLUSTERS line and PRE-COMPUTED ANALYSIS markers from displayed text
-    agent_text = re.sub(r'\s*DISPLAY_CLUSTERS:[\d,\s]*', '', agent_text or "").strip()
+    agent_text = re.sub(r'^<eos>\s*', '', agent_text or "").strip()           # Gemma 4 leaks <eos> token
+    agent_text = re.sub(r'^The PRE-COMPUTED[^\n]*\n?', '', agent_text).strip()  # leaked instruction header
+    agent_text = re.sub(r'\s*DISPLAY_CLUSTERS:[\d,\s]*', '', agent_text).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED ANALYSIS.*?===\n?', '', agent_text).strip()
     agent_text = re.sub(r'===\s*END PRE-COMPUTED ANALYSIS\s*===\n?', '', agent_text).strip()
     agent_text = re.sub(r'PRE-COMPUTED ANALYSIS[:\s]*\n?', '', agent_text).strip()

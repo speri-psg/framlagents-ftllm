@@ -1,4 +1,4 @@
-# FRAML AI Assistant — Demo Prompt List
+# ARIA — Demo Prompt List
 
 Ordered for a natural narrative flow: *find the right threshold → understand who your customers are → see where alerts concentrate → decide where to focus.*
 

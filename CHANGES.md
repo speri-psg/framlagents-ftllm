@@ -1,7 +1,7 @@
-# FRAML AI Assistant — Changes Log
+# ARIA — Changes Log
 **Project:** `framlagents_ftLLM`
 **Date:** 2026-03-23
-**Objective:** Build a self-contained FRAML chat interface using Qwen2.5 via Ollama with threshold tuning and smart segmentation
+**Objective:** Build a self-contained FRAML chat interface using Qwen2.5 via Ollama with threshold tuning and dynamic segmentation
 
 ---
 

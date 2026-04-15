@@ -475,7 +475,7 @@ def perform_clustering(df, customer_type=None, n_clusters=4):
 
     fig = px.scatter(
         scatter_df, x='PC1', y='PC2', color='Cluster',
-        title=f"Smart Segmentation Clustering — {seg_label} ({n_clusters} clusters, active accounts only)",
+        title=f"Dynamic Segmentation Clustering — {seg_label} ({n_clusters} clusters, active accounts only)",
         labels={
             'PC1': f'PC1 ({var1:.1f}% variance)',
             'PC2': f'PC2 ({var2:.1f}% variance)',
@@ -499,12 +499,12 @@ def perform_clustering(df, customer_type=None, n_clusters=4):
     for i in range(n_clusters):
         c   = df_active[df_active['cluster'] == i]
         pct = 100 * len(c) / total_active if total_active > 0 else 0
-        parts = [f"n={len(c):,} ({pct:.1f}% of active accounts)"]
+        stats_lines.append(f"\n**Cluster {i+1}**")
+        stats_lines.append(f"- Customers: **{len(c):,}** ({pct:.1f}% of active accounts)")
         for col in numeric_cols:
             val = c[col].median()
             if not (val != val):  # skip NaN
-                parts.append(f"{col}={val:.1f}")
-        stats_lines.append(f"  Cluster {i+1}: " + ", ".join(parts))
+                stats_lines.append(f"- {col}: **{val:,.1f}**")
 
     return fig, "\n".join(stats_lines), df_active
 

@@ -1,5 +1,5 @@
 """
-ss_data_prep.py — Smart Segmentation Data Preparation
+ss_data_prep.py — Dynamic Segmentation Data Preparation
 
 Schema:
   aml_s_customers.csv          id → customer_id
@@ -99,7 +99,7 @@ def compute_txn_aggregates(txn):
 
 def prepare_data():
     print(f"\n{'='*60}")
-    print("Smart Segmentation Data Prep")
+    print("Dynamic Segmentation Data Prep")
     print(f"{'='*60}\n")
 
     # ── 1. Load files ────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-"""Segmentation Agent — K-Means cluster analysis and smart segmentation tree."""
+"""Segmentation Agent — K-Means cluster analysis and dynamic segmentation tree."""
 
 from .base_agent import BaseAgent
 
@@ -9,7 +9,7 @@ TOOLS = [
         "function": {
             "name": "cluster_analysis",
             "description": (
-                "Perform smart segmentation using K-Means cluster analysis on customer data. "
+                "Perform dynamic segmentation using K-Means cluster analysis on customer data. "
                 "Uses numeric features (avg transactions, amounts, income, balance, age) and "
                 "categorical features (account type, gender, age category, channel, NNM, OFAC, 314b). "
                 "Alert labels (FP, FN, ALERT) are excluded so clusters reflect natural behavior profiles. "
@@ -55,13 +55,13 @@ TOOLS = [
         "function": {
             "name": "ss_cluster_analysis",
             "description": (
-                "Perform smart segmentation clustering on the ss_files raw data "
+                "Perform dynamic segmentation clustering on the ss_files raw data "
                 "(customers, accounts, relationships, transactions). "
                 "Auto-prepares and joins source data if not already done. "
                 "Uses customer demographics (age, gender, citizenship), account features "
                 "(account type, balance, account age), and transaction aggregates "
                 "(avg transactions/week, avg amount, monthly amount) for K-Means clustering. "
-                "Returns a PCA scatter plot and a smart segmentation treemap. "
+                "Returns a PCA scatter plot and a dynamic segmentation treemap. "
                 "Use n_clusters=0 to auto-select optimal K via elbow method."
             ),
             "parameters": {
@@ -80,7 +80,7 @@ TOOLS = [
 ]
 
 SYSTEM_PROMPT = """\
-You are a FRAML smart segmentation specialist. You identify natural customer behavioral \
+You are an AML dynamic segmentation specialist. You identify natural customer behavioral \
 segments using unsupervised K-Means clustering and explain their AML risk profiles. \
 IMPORTANT: You MUST respond entirely in English. Do NOT use any Chinese or other non-English characters.
 

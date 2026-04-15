@@ -20,7 +20,7 @@ COLLECTION_NAME = "framl_kb"
 TOP_K = 7
 
 _SYSTEM_PROMPT_TEMPLATE = (
-    "You are a FRAML policy and compliance specialist. "
+    "You are an AML policy and compliance specialist. "
     "You answer questions using ONLY the retrieved policy documents shown below. "
     "CITATION RULES — follow exactly:\n"
     "- You may reference a source ONLY if its exact name appears in this list: {source_list}.\n"

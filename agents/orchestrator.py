@@ -3,7 +3,7 @@ Orchestrator Agent — routes user queries to specialist agents and runs them in
 
 Routing is done via LLM classification (single fast API call):
   threshold    → ThresholdAgent    (FP/FN tuning, alert stats)
-  segmentation → SegmentationAgent (clustering, smart segmentation, alerts distribution)
+  segmentation → SegmentationAgent (clustering, dynamic segmentation, alerts distribution)
   policy       → PolicyAgent       (AML policy, regulatory questions)
   greeting     → friendly greeting response (no agent run)
   out_of_scope → polite refusal (no agent run)
@@ -18,14 +18,15 @@ from .segmentation_agent import SegmentationAgent
 from .policy_agent import PolicyAgent
 
 _CLASSIFY_SYSTEM = """\
-You are a routing classifier for a FRAML AI Assistant. Given a user query, respond with \
+You are a routing classifier for ARIA. Given a user query, respond with \
 one or more of these labels (comma-separated, no other text):
 
   threshold    — user wants to RUN threshold tuning analysis on OUR LOCAL DATA (FP/FN trade-off charts, sweep analysis)
   segmentation — user wants to RUN clustering/segmentation on OUR LOCAL DATA (K-Means, treemap, behavioral groups)
+  ofac         — user wants to RUN OFAC sanctions screening on OUR LOCAL CUSTOMER DATA (SDN list hits, sanctioned country exposure)
   policy       — user is asking a GENERAL KNOWLEDGE question about AML, compliance, regulations, industry practices, or best practices — does NOT require running local data analysis
   greeting     — query is a greeting or social pleasantry (hello, hi, how are you, etc.)
-  out_of_scope — query is not related to any of the above FRAML topics
+  out_of_scope — query is not related to any of the above AML topics
 
 Key distinction:
 - "Show FP/FN tuning for Business customers" → threshold  (run local analysis)
@@ -79,18 +80,26 @@ Key distinction:
 - "Which Business cluster has the most activity?" → segmentation
 - "Which cluster has the most transaction activity?" → segmentation
 - "Show Business customer clusters by transaction behavior" → segmentation
+- "Run OFAC screening" → ofac
+- "Show OFAC sanctions exposure" → ofac
+- "Which customers are on the sanctions list?" → ofac
+- "How many customers are from sanctioned countries?" → ofac
+- "Show me OFAC hits" → ofac
+- "Screen customers against SDN list" → ofac
+- "What is our Iran/North Korea customer exposure?" → ofac
+- "Show comprehensive sanctions hits" → ofac
 
 Rules:
 - Output ONLY the label(s), comma-separated. No explanation, no punctuation other than commas.
 - A query can map to multiple labels (e.g. threshold,segmentation).
-- When in doubt between out_of_scope and a FRAML label, prefer the FRAML label.\
+- When in doubt between out_of_scope and a AML label, prefer the AML label.\
 """
 
 
 class OrchestratorAgent:
 
     _GREETING = (
-        "Hello! I'm your FRAML AI Assistant. I can help you with:\n"
+        "Hello! I'm ARIA — Agentic Risk Intelligence for AML. I can help you with:\n"
         "- **Threshold tuning** — FP/FN trade-off analysis\n"
         "- **Customer segmentation** — K-Means clustering\n"
         "- **AML policy Q&A** — compliance and regulatory questions\n\n"
@@ -98,7 +107,7 @@ class OrchestratorAgent:
     )
 
     _OUT_OF_SCOPE = (
-        "I can only help with FRAML-specific topics:\n"
+        "I can only help with AML-specific topics:\n"
         "- **Threshold tuning** — FP/FN trade-off analysis\n"
         "- **Customer segmentation** — K-Means clustering\n"
         "- **AML policy Q&A** — compliance and regulatory questions\n\n"
@@ -130,7 +139,7 @@ class OrchestratorAgent:
                 messages=classify_messages,
             )
             raw = resp.choices[0].message.content or ""
-            valid = {"threshold", "segmentation", "policy", "greeting", "out_of_scope"}
+            valid = {"threshold", "segmentation", "ofac", "policy", "greeting", "out_of_scope"}
             labels = [l.strip().lower() for l in raw.split(",") if l.strip().lower() in valid]
         except Exception as e:
             print(f"[orchestrator] classification error: {e} — defaulting to out_of_scope")
@@ -153,10 +162,21 @@ class OrchestratorAgent:
             labels = ["threshold"]
             print("[orchestrator] keyword override → threshold (rule query, dropped policy)")
 
+        # OFAC keyword override — always catch sanctions/OFAC queries
+        is_ofac = any(w in q_lower for w in [
+            "ofac", "sdn", "sanctions", "sanctioned", "sanction list",
+            "iran exposure", "north korea exposure", "dprk", "SDN list",
+        ])
+        if is_ofac:
+            labels = ["ofac"]
+            print("[orchestrator] keyword override → ofac")
+
         # Keyword fallback when fine-tuned model ignores classification prompt
         if not labels:
             q = query.lower()
-            if any(w in q for w in ["threshold", "sweep", "fp", "fn", "sar", "heatmap", "rule", "alert", "tuning", "backtest"]):
+            if any(w in q for w in ["ofac", "sdn", "sanction"]):
+                labels = ["ofac"]
+            elif any(w in q for w in ["threshold", "sweep", "fp", "fn", "sar", "heatmap", "rule", "alert", "tuning", "backtest"]):
                 labels = ["threshold"]
             elif any(w in q for w in ["cluster", "segment", "k-means", "kmeans", "treemap"]):
                 labels = ["segmentation"]
@@ -180,6 +200,12 @@ class OrchestratorAgent:
 
         if "greeting" in labels:
             return self._GREETING, []
+
+        # OFAC screening is handled directly via tool_executor (no specialist agent)
+        if "ofac" in labels:
+            text, fig = tool_executor("ofac_screening", {})
+            chart_results = [("ofac_screening", {}, fig)] if fig is not None else []
+            return text, chart_results
 
         agent_labels = [l for l in labels if l in self._agent_map]
 

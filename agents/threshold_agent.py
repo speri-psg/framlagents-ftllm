@@ -106,7 +106,7 @@ TOOLS = [
                     "cluster": {
                         "type": "integer",
                         "description": (
-                            "Optional behavioral cluster number (1–4) from smart segmentation. "
+                            "Optional behavioral cluster number (1–4) from dynamic segmentation. "
                             "When specified, the sweep runs only on customers in that cluster. "
                             "Use this when the user asks about a specific segment cluster "
                             "(e.g. 'show Elder Abuse sweep for Cluster 4')."
@@ -168,7 +168,7 @@ TOOLS = [
                     "cluster": {
                         "type": "integer",
                         "description": (
-                            "Optional behavioral cluster number (1–4) from smart segmentation. "
+                            "Optional behavioral cluster number (1–4) from dynamic segmentation. "
                             "When specified, the SAR backtest runs only on customers in that cluster. "
                             "Use this when the user asks about a specific segment cluster "
                             "(e.g. 'show Elder Abuse SAR backtest for Cluster 2')."
@@ -182,7 +182,7 @@ TOOLS = [
 ]
 
 SYSTEM_PROMPT = """\
-You are a FRAML threshold tuning specialist. You analyze false positive (FP) and \
+You are an AML threshold tuning specialist. You analyze false positive (FP) and \
 false negative (FN) trade-offs as AML alert thresholds change. \
 IMPORTANT: You MUST respond entirely in English. Do NOT use any Chinese or other non-English characters.
 

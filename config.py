@@ -1,5 +1,5 @@
 """
-config.py — Central configuration for FRAML AI Assistant.
+config.py — Central configuration for ARIA.
 
 Override LLM endpoint via environment variables:
     set OLLAMA_BASE_URL=http://localhost:11434/v1   (default — Ollama)
@@ -29,3 +29,5 @@ CLUSTER_LABELS_CSV  = os.path.join(_HERE, "docs", "customer_cluster_labels.csv")
 SS_FILES_DIR        = os.path.join(_HERE, "ss_files")
 CHROMA_PATH         = os.path.join(_HERE, "chroma_db")
 DOCS_DIR            = os.path.join(_HERE, "docs")
+OFAC_DB             = os.path.join(_HERE, "data", "ofac_sdn.db")
+CUSTOMERS_CSV       = os.path.join(_HERE, "ss_files_anon", "aml_s_customers.csv")

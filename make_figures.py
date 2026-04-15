@@ -508,6 +508,124 @@ def rule_2d_heatmap(grid_dict):
     return fig
 
 
+# ── 8a. 2D Sweep ranked table ────────────────────────────────────────────────
+
+def rule_2d_ranked_table(grid_dict, top_n=15):
+    """
+    Ranked table of 2D sweep combinations sorted by best FP reduction
+    while keeping TP rate >= 50%. Easier for AML analysts than a heatmap.
+    Highlights the current condition row.
+    """
+    if grid_dict is None:
+        return None
+
+    p1_vals    = grid_dict["p1_vals"]
+    p2_vals    = grid_dict["p2_vals"]
+    sar_grid   = grid_dict["sar_grid"]
+    fp_grid    = grid_dict["fp_grid"]
+    total_sars = grid_dict["total_sars"]
+    total_fps  = grid_dict["total_fps"]
+    p1_label   = grid_dict["p1_label"]
+    p2_label   = grid_dict["p2_label"]
+    p1_cur     = float(grid_dict["p1_current"])
+    p2_cur     = float(grid_dict["p2_current"])
+    p1_fmt_pct = grid_dict.get("p1_format_pct", False)
+    p2_fmt_pct = grid_dict.get("p2_format_pct", False)
+    rf_name    = grid_dict["rf_name"]
+    param1     = grid_dict["param1"]
+    param2     = grid_dict["param2"]
+
+    def fmt(v, as_pct=False):
+        if as_pct:
+            return f"{v * 100:g}%"
+        if isinstance(v, float) and v == int(v):
+            v = int(v)
+        return f"{v:,}" if isinstance(v, int) and abs(v) >= 1000 else (f"{v:,.0f}" if abs(v) >= 1000 else str(v))
+
+    rows = []
+    for i, v1 in enumerate(p1_vals):
+        for j, v2 in enumerate(p2_vals):
+            tp = sar_grid[i][j]
+            fp = fp_grid[i][j]
+            fn = total_sars - tp
+            tn = total_fps  - fp
+            tp_rate   = round(100 * tp / total_sars, 1) if total_sars > 0 else 0
+            precision = round(100 * tp / (tp + fp), 1)  if (tp + fp) > 0  else 0
+            fp_reduc  = round(100 * (total_fps - fp) / total_fps, 1) if total_fps > 0 else 0
+            is_current = (abs(v1 - p1_cur) < 1e-6 or i == min(range(len(p1_vals)), key=lambda x: abs(p1_vals[x] - p1_cur))) and \
+                         (abs(v2 - p2_cur) < 1e-6 or j == min(range(len(p2_vals)), key=lambda x: abs(p2_vals[x] - p2_cur)))
+            rows.append({
+                "v1": v1, "v2": v2,
+                "tp": tp, "fp": fp, "fn": fn, "tn": tn,
+                "tp_rate": tp_rate, "precision": precision, "fp_reduc": fp_reduc,
+                "is_current": is_current,
+            })
+
+    # Sort: highest TP rate first, then lowest FP
+    rows.sort(key=lambda r: (-r["tp_rate"], r["fp"]))
+    rows = rows[:top_n]
+
+    p1_col = [fmt(r["v1"], p1_fmt_pct) for r in rows]
+    p2_col = [fmt(r["v2"], p2_fmt_pct) for r in rows]
+    tp_col    = [f"{r['tp']}" for r in rows]
+    fp_col    = [f"{r['fp']}" for r in rows]
+    fn_col    = [f"{r['fn']}" for r in rows]
+    rate_col  = [f"{r['tp_rate']}%" for r in rows]
+    prec_col  = [f"{r['precision']}%" for r in rows]
+    reduc_col = [f"{r['fp_reduc']}%" for r in rows]
+
+    # Row colours: current = blue, high TP rate = light green, low TP = light red
+    fill_colors = []
+    font_colors = []
+    for r in rows:
+        if r["is_current"]:
+            fill_colors.append("#2980b9"); font_colors.append("white")
+        elif r["tp_rate"] >= 80:
+            fill_colors.append("#d5f5e3"); font_colors.append("#1a1a1a")
+        elif r["tp_rate"] >= 50:
+            fill_colors.append("#fef9e7"); font_colors.append("#1a1a1a")
+        else:
+            fill_colors.append("#fadbd8"); font_colors.append("#1a1a1a")
+
+    header_vals = [p1_label, p2_label, "SARs Caught", "False Positives",
+                   "Missed SARs", "SAR Catch %", "Precision", "FP Reduction"]
+
+    fig = go.Figure(go.Table(
+        columnwidth=[120, 120, 90, 100, 90, 90, 90, 100],
+        header=dict(
+            values=[f"<b>{h}</b>" for h in header_vals],
+            fill_color="#2c3e50",
+            font=dict(color="white", size=12),
+            align="center",
+            height=32,
+        ),
+        cells=dict(
+            values=[p1_col, p2_col, tp_col, fp_col, fn_col, rate_col, prec_col, reduc_col],
+            fill_color=[fill_colors] * 8,
+            font=dict(color=[font_colors] * 8, size=11),
+            align="center",
+            height=28,
+        ),
+    ))
+
+    fig.update_layout(
+        title=dict(
+            text=(
+                f"<b>{rf_name}</b> — Top {top_n} Parameter Combinations<br>"
+                f"<sup>Sorted by SAR catch rate (highest first) &nbsp;|&nbsp; "
+                f"<span style='color:#27ae60'>Green</span>=≥80% catch &nbsp;|&nbsp; "
+                f"<span style='color:#f39c12'>Yellow</span>=50–80% &nbsp;|&nbsp; "
+                f"<span style='color:#e74c3c'>Red</span>=&lt;50% &nbsp;|&nbsp; "
+                f"<span style='color:#2980b9;font-weight:bold'>Blue</span>=current condition</sup>"
+            ),
+            font=dict(size=13),
+        ),
+        height=min(120 + 30 * len(rows), 580),
+        margin=dict(l=10, r=10, t=90, b=10),
+    )
+    return fig
+
+
 # ── 8. Rule alert distribution by cluster ────────────────────────────────────
 
 def rule_alerts_by_cluster(df_rule_sweep, df_cluster_labels, rf_name, target_cluster):
