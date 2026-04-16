@@ -257,7 +257,9 @@ class BaseAgent:
                 tool_call_count += 1
                 create_kwargs["messages"] = messages
                 if tool_call_count >= self.max_tool_calls:
-                    create_kwargs["tool_choice"] = "none"
+                    # Remove tools entirely so Ollama's native parser can't fire again
+                    create_kwargs.pop("tools", None)
+                    create_kwargs.pop("tool_choice", None)
 
             else:
                 # No tool call found — final text response
