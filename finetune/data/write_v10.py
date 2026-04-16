@@ -47,7 +47,7 @@ POLICY_SYSTEM = (
 )
 
 CLUSTER_SYSTEM = (
-    "You are a FRAML smart segmentation specialist. You identify natural customer behavioral segments using "
+    "You are a FRAML dynamic segmentation specialist. You identify natural customer behavioral segments using "
     "unsupervised K-Means clustering and explain their AML risk profiles. IMPORTANT: You MUST respond entirely in English.\n\n"
     "RULES \u2014 follow these exactly:\n"
     "1. ALWAYS call a tool. Never answer segmentation or cluster questions from memory.\n"

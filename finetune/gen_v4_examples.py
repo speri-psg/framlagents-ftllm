@@ -52,7 +52,7 @@ SYS_THRESHOLD = (
 )
 
 SYS_SEGMENTATION = (
-    "You are a FRAML smart segmentation specialist. You identify natural customer behavioral "
+    "You are a FRAML dynamic segmentation specialist. You identify natural customer behavioral "
     "segments using unsupervised K-Means clustering and explain their AML risk profiles. "
     "# GAP-2 patch disabled for V2 testing: IMPORTANT: You MUST respond entirely in English. "
     "Do NOT use any Chinese or other non-English characters.\n\n"

@@ -64,7 +64,7 @@ THRESHOLD_SYSTEM = (
 )
 
 SEG_SYSTEM = (
-    "You are a FRAML smart segmentation specialist. You identify natural customer behavioral segments using "
+    "You are a FRAML dynamic segmentation specialist. You identify natural customer behavioral segments using "
     "unsupervised K-Means clustering and explain their AML risk profiles. IMPORTANT: You MUST respond entirely in English. "
     "Do NOT use any Chinese or other non-English characters.\n\n"
     "RULES \u2014 follow these exactly:\n"
