@@ -133,7 +133,7 @@ def smartseg_tree():
 
     # Root node
     r = dtree.agg(agg)
-    rows.append({'id': 'All', 'parent': '', 'label': 'AML Smart Segments',
+    rows.append({'id': 'All', 'parent': '', 'label': 'AML Dynamic Segments',
                  'amount_MEAN': r['amount_MEAN'], 'avg_num_trxns_MEAN': r['avg_num_trxns_MEAN'],
                  'avg_trxn_amt_MEAN': r['avg_trxn_amt_MEAN'], 'NUM_COUNT': r['NUM_COUNT']})
 
@@ -196,7 +196,7 @@ def smartseg_tree():
         ),
     ))
     fig.update_layout(
-        title='AML Smart Segments',
+        title='AML Dynamic Segments',
         font_size=14,
         margin=dict(t=50, l=25, r=25, b=25),
     )
@@ -613,7 +613,7 @@ def smartseg_tree_dynamic(df_clustered, seg_label="All", dims=None, df_rule_swee
                       if len(grp) / total_rows < SMALL_CLUSTER_THRESHOLD} if total_rows > 0 else set()
 
     # Root
-    add_row('All', '', f'Smart Segments - {seg_label}', df, cidx=None)
+    add_row('All', '', f'Dynamic Segments - {seg_label}', df, cidx=None)
 
     # Add a "Small Clusters" bucket if any clusters are below threshold
     if small_clusters:
@@ -699,7 +699,7 @@ def smartseg_tree_dynamic(df_clustered, seg_label="All", dims=None, df_rule_swee
         marker=dict(colors=node_colors),
     ))
     fig.update_layout(
-        title=f'AML Smart Segments (Dynamic Clustering) - {seg_label}',
+        title=f'AML Dynamic Segments - {seg_label}',
         font_size=14,
         margin=dict(t=50, l=25, r=25, b=25),
     )

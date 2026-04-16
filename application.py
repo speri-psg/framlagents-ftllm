@@ -907,10 +907,10 @@ def _chart_content(tool_name, tool_input, fig):
         prefix = "SS " if tool_name == "ss_cluster_analysis" else ""
         if isinstance(fig, tuple) and len(fig) == 3:
             figs   = list(fig)
-            labels = [f"Cluster Summary — {ct}", f"{prefix}Cluster Scatter — {ct}", f"{prefix}Smart Segment Treemap — {ct}"]
+            labels = [f"Cluster Summary — {ct}", f"{prefix}Cluster Scatter — {ct}", f"{prefix}Dynamic Segment Treemap — {ct}"]
         elif isinstance(fig, tuple):
             figs   = list(fig)
-            labels = [f"{prefix}Cluster Scatter — {ct}", f"{prefix}Smart Segment Treemap — {ct}"]
+            labels = [f"{prefix}Cluster Scatter — {ct}", f"{prefix}Dynamic Segment Treemap — {ct}"]
         else:
             figs   = [fig]
             labels = [f"{prefix}Cluster Analysis — {ct}"]
