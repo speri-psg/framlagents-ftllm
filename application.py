@@ -1379,6 +1379,12 @@ def handle_chat(new_message, pending_prompt, messages):
     agent_text = re.sub(r'===\s*END RULE LIST\s*===\n?', '', agent_text).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED 2D SWEEP.*?===\n?', '', agent_text).strip()
     agent_text = re.sub(r'===\s*END 2D SWEEP\s*===\n?', '', agent_text).strip()
+    # Strip Gemma 4 self-review chain-of-thought block
+    agent_text = re.sub(r'\(Self-Correction.*?The response aligns with all rules\.\s*', '', agent_text, flags=re.DOTALL).strip()
+    agent_text = re.sub(r'\(Self-Correction.*?\)\s*', '', agent_text, flags=re.DOTALL).strip()
+    # Strip <channel|> and similar Gemma 4 control tokens
+    agent_text = re.sub(r'<channel\|[^>]*>', '', agent_text).strip()
+    agent_text = re.sub(r'<channel\|>', '', agent_text).strip()
 
     if chart_results:
         content = [{"type": "text", "text": agent_text}] if agent_text else []
