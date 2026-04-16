@@ -495,16 +495,25 @@ def perform_clustering(df, customer_type=None, n_clusters=4):
         f"PCA variance explained: PC1={var1:.1f}%, PC2={var2:.1f}%",
         "",
     ]
+    # Columns to skip in stats display per segment
+    _skip_cols = set()
+    if seg_label.upper() == "BUSINESS":
+        _skip_cols.add("INCOME")   # income is individual-only
+        _skip_cols.add("AGE")      # age not collected for businesses
+
     total_active = len(df_active)
     for i in range(n_clusters):
         c   = df_active[df_active['cluster'] == i]
         pct = 100 * len(c) / total_active if total_active > 0 else 0
-        stats_lines.append(f"\n**Cluster {i+1}**")
+        stats_lines.append(f"**Cluster {i+1}**")
         stats_lines.append(f"- Customers: **{len(c):,}** ({pct:.1f}% of active accounts)")
         for col in numeric_cols:
+            if col in _skip_cols:
+                continue
             val = c[col].median()
             if not (val != val):  # skip NaN
                 stats_lines.append(f"- {col}: **{val:,.1f}**")
+        stats_lines.append("")  # blank line after each cluster block
 
     return fig, "\n".join(stats_lines), df_active
 
