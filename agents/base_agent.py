@@ -1,6 +1,7 @@
 """Base agent — shared agentic tool-use loop using OpenAI-compatible API (Ollama / vLLM)."""
 
 import json
+import re
 import sys
 import os
 from openai import OpenAI
@@ -19,6 +20,140 @@ MODEL_NAME    = OLLAMA_MODEL
 
 MAX_TOOL_ITERATIONS = 6  # prevent infinite loops if model misfires
 
+# ---------------------------------------------------------------------------
+# Multi-format tool call parser
+# ---------------------------------------------------------------------------
+# Maps known model hallucinations / alternative names → canonical tool names.
+# Add entries here when a new model variant uses a different name.
+_TOOL_NAME_ALIASES = {
+    # Gemma 4 hallucinations
+    "threshold_analysis":   "threshold_tuning",
+    "threshold_sweep":      "threshold_tuning",
+    "fp_fn_analysis":       "threshold_tuning",
+    "fp_fn_tuning":         "threshold_tuning",
+    "analyze_threshold":    "threshold_tuning",
+    "alert_analysis":       "threshold_tuning",
+    # Qwen / other model variants
+    "cluster_analysis":     "segmentation",
+    "segment_analysis":     "segmentation",
+    "segmentation_analysis":"segmentation",
+    "sanctions_screening":  "ofac_screening",
+    "ofac_check":           "ofac_screening",
+    "sdn_screening":        "ofac_screening",
+    "sar_analysis":         "sar_backtest",
+    "sar_detection":        "sar_backtest",
+    "backtest":             "sar_backtest",
+}
+
+# Maps alternative argument names → canonical argument names, per tool.
+_ARG_ALIASES = {
+    "threshold_tuning": {
+        "customer_type":       "segment",
+        "customer_segment":    "segment",
+        "segment_type":        "segment",
+        "transaction_amount":  "threshold_column",
+        "amount_type":         "threshold_column",
+        "column":              "threshold_column",
+        "metric":              "threshold_column",
+    },
+    "sar_backtest": {
+        "customer_type":       "segment",
+        "customer_segment":    "segment",
+        "column":              "threshold_column",
+        "transaction_amount":  "threshold_column",
+    },
+    "rule_sar_backtest": {
+        "rule":                "risk_factor",
+        "rule_name":           "risk_factor",
+        "risk_factor_name":    "risk_factor",
+        "parameter":           "sweep_param",
+        "param":               "sweep_param",
+        "sweep_parameter":     "sweep_param",
+    },
+    "rule_2d_sweep": {
+        "rule":                "risk_factor",
+        "rule_name":           "risk_factor",
+        "param_1":             "sweep_param_1",
+        "param_2":             "sweep_param_2",
+        "parameter_1":         "sweep_param_1",
+        "parameter_2":         "sweep_param_2",
+    },
+}
+
+
+def _normalize_tool_name(name: str) -> str:
+    return _TOOL_NAME_ALIASES.get(name, name)
+
+
+def _normalize_args(tool_name: str, args: dict) -> dict:
+    aliases = _ARG_ALIASES.get(tool_name, {})
+    return {aliases.get(k, k): v for k, v in args.items()}
+
+
+def _parse_tool_call_from_content(content: str) -> tuple | None:
+    """
+    Fallback parser for when Ollama fails to extract a tool call from model output.
+    Handles three model output formats:
+
+    Gemma 4 native:    call:tool_name\\n{...}
+    OpenAI-style JSON: {"name": "tool_name", "arguments": {...}}
+    Qwen style:        <tool_call>\\n{"name": "...", "arguments": {...}}\\n</tool_call>
+
+    Returns (tool_name, args_dict) or None.
+    """
+    if not content:
+        return None
+
+    # Format 1: Gemma 4 native — "call:tool_name" followed by a JSON block
+    m = re.search(
+        r'call:(\w+)\s*\n\s*(\{(?:[^{}]|\{[^{}]*\})*\})',
+        content, re.DOTALL
+    )
+    if m:
+        raw_name = m.group(1).strip()
+        name = _normalize_tool_name(raw_name)
+        try:
+            args = json.loads(m.group(2))
+            print(f"[base_agent] fallback parse (Gemma4 format): {raw_name} → {name}")
+            return name, _normalize_args(name, args)
+        except json.JSONDecodeError:
+            pass
+
+    # Format 2: Qwen style — <tool_call>{"name": ..., "arguments": ...}</tool_call>
+    m = re.search(r'<tool_call>\s*(\{.*?\})\s*</tool_call>', content, re.DOTALL)
+    if m:
+        try:
+            obj = json.loads(m.group(1))
+            if "name" in obj and "arguments" in obj:
+                raw_name = obj["name"]
+                name = _normalize_tool_name(raw_name)
+                args = obj["arguments"] if isinstance(obj["arguments"], dict) else {}
+                print(f"[base_agent] fallback parse (Qwen format): {raw_name} → {name}")
+                return name, _normalize_args(name, args)
+        except json.JSONDecodeError:
+            pass
+
+    # Format 3: OpenAI-style JSON — {"name": "...", "arguments": {...}}
+    m = re.search(
+        r'\{\s*"name"\s*:\s*"(\w+)"\s*,\s*"arguments"\s*:\s*(\{(?:[^{}]|\{[^{}]*\})*\})\s*\}',
+        content, re.DOTALL
+    )
+    if m:
+        raw_name = m.group(1).strip()
+        name = _normalize_tool_name(raw_name)
+        try:
+            args = json.loads(m.group(2))
+            print(f"[base_agent] fallback parse (OpenAI-JSON format): {raw_name} → {name}")
+            return name, _normalize_args(name, args)
+        except json.JSONDecodeError:
+            pass
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Base agent
+# ---------------------------------------------------------------------------
 
 class BaseAgent:
     def __init__(self, name: str, system_prompt: str, tools: list, max_tool_calls: int = 1):
@@ -56,11 +191,25 @@ class BaseAgent:
             response = self.client.chat.completions.create(**create_kwargs)
             msg = response.choices[0].message
 
+            # ── Determine tool calls to execute ──────────────────────────────
+            # Primary path: Ollama parsed tool_calls correctly (well-trained model)
+            # Fallback path: parse raw content for Gemma4 / Qwen / OpenAI-JSON formats
+            structured_calls = []  # list of (name, args, tc_id)
+
             if msg.tool_calls:
-                # Append assistant turn with tool_calls for context
+                for tc in msg.tool_calls:
+                    try:
+                        args = json.loads(tc.function.arguments)
+                    except json.JSONDecodeError:
+                        args = {}
+                    name = _normalize_tool_name(tc.function.name)
+                    args = _normalize_args(name, args)
+                    structured_calls.append((name, args, tc.id))
+
+                # Record assistant turn with original tool_calls for context
                 messages.append({
                     "role": "assistant",
-                    "content": msg.content,  # may be None
+                    "content": msg.content,
                     "tool_calls": [
                         {
                             "id": tc.id,
@@ -74,21 +223,36 @@ class BaseAgent:
                     ],
                 })
 
-                # Execute each tool call; append individual tool result messages
-                for tc in msg.tool_calls:
-                    try:
-                        tool_input = json.loads(tc.function.arguments)
-                    except json.JSONDecodeError:
-                        tool_input = {}
-                    print(f"[{self.name}] tool call: {tc.function.name}({tool_input})")
-                    result_text, fig = tool_executor(tc.function.name, tool_input)
+            elif msg.content and tool_call_count < self.max_tool_calls:
+                # Fallback: try to extract a tool call from raw content
+                parsed = _parse_tool_call_from_content(msg.content)
+                if parsed:
+                    name, args = parsed
+                    fake_id = f"fallback_{iteration}"
+                    structured_calls.append((name, args, fake_id))
+                    # Use a simplified message format compatible with all models
+                    messages.append({"role": "assistant", "content": msg.content})
+
+            # ── Execute tool calls ────────────────────────────────────────────
+            if structured_calls:
+                for name, args, tc_id in structured_calls:
+                    print(f"[{self.name}] tool call: {name}({args})")
+                    result_text, fig = tool_executor(name, args)
                     if fig is not None:
-                        chart_results.append((tc.function.name, tool_input, fig))
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": result_text,
-                    })
+                        chart_results.append((name, args, fig))
+
+                    # Use tool role for structured calls, user role for fallback
+                    if tc_id.startswith("fallback_"):
+                        messages.append({
+                            "role": "user",
+                            "content": f"Tool result for {name}:\n{result_text}",
+                        })
+                    else:
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc_id,
+                            "content": result_text,
+                        })
 
                 tool_call_count += 1
                 create_kwargs["messages"] = messages
@@ -96,7 +260,7 @@ class BaseAgent:
                     create_kwargs["tool_choice"] = "none"
 
             else:
-                # Final text response (or base model answered without tool call)
+                # No tool call found — final text response
                 return msg.content or "", chart_results
 
         # Exceeded max iterations — return whatever text we have
