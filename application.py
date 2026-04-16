@@ -1363,7 +1363,7 @@ def handle_chat(new_message, pending_prompt, messages):
                               {"customer_type": customer_type, "filter_clusters": filter_nums},
                               (filtered_scatter, treemap_fig))]
     # Strip DISPLAY_CLUSTERS line and PRE-COMPUTED ANALYSIS markers from displayed text
-    agent_text = re.sub(r'^<eos>\s*', '', agent_text or "").strip()           # Gemma 4 leaks <eos> token
+    agent_text = re.sub(r'<eos>', '', agent_text or "").strip()               # Gemma 4 leaks <eos> tokens (strip all)
     agent_text = re.sub(r'^The PRE-COMPUTED[^\n]*\n?', '', agent_text).strip()  # leaked instruction header
     agent_text = re.sub(r'\s*DISPLAY_CLUSTERS:[\d,\s]*', '', agent_text).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED ANALYSIS.*?===\n?', '', agent_text).strip()
