@@ -12,13 +12,13 @@ _PROJECT_ROOT = os.path.dirname(_AGENTS_DIR)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from config import OLLAMA_BASE_URL, OLLAMA_MODEL
+from config import OLLAMA_BASE_URL, OLLAMA_MODEL, MAX_TOKENS_TOOL, MAX_TOOL_CALLS
 
 # Keep legacy names so any external code that imported these still works
 VLLM_BASE_URL = OLLAMA_BASE_URL
 MODEL_NAME    = OLLAMA_MODEL
 
-MAX_TOOL_ITERATIONS = 6  # prevent infinite loops if model misfires
+MAX_TOOL_ITERATIONS = MAX_TOOL_CALLS  # prevent infinite loops if model misfires
 
 # ---------------------------------------------------------------------------
 # Multi-format tool call parser
@@ -180,7 +180,7 @@ class BaseAgent:
 
         create_kwargs = dict(
             model=self.model,
-            max_tokens=1024,
+            max_tokens=MAX_TOKENS_TOOL,
             messages=messages,
         )
         if self.tools:

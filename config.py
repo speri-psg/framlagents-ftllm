@@ -19,6 +19,11 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL",
 OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL",
                             os.getenv("VLLM_MODEL", "qwen2.5:7b"))
 
+# ── LLM generation parameters ────────────────────────────────────────────────
+MAX_TOKENS_TOOL   = int(os.getenv("MAX_TOKENS_TOOL",   "2048"))  # threshold / segmentation agents
+MAX_TOKENS_POLICY = int(os.getenv("MAX_TOKENS_POLICY", "2048"))  # policy agent (longer KB responses)
+MAX_TOOL_CALLS    = int(os.getenv("MAX_TOOL_CALLS",    "6"))      # max agentic loop iterations
+
 # ── Local data paths (all relative to this file's directory) ─────────────────
 _HERE = os.path.dirname(os.path.abspath(__file__))
 

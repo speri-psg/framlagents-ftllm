@@ -8,6 +8,7 @@ from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunct
 from openai import OpenAI
 
 from .base_agent import OLLAMA_BASE_URL, OLLAMA_MODEL
+from config import MAX_TOKENS_POLICY
 
 _AGENTS_DIR   = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(_AGENTS_DIR)
@@ -150,7 +151,7 @@ class PolicyAgent:
 
         response = self.client.chat.completions.create(
             model=self.model,
-            max_tokens=1024,
+            max_tokens=MAX_TOKENS_POLICY,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
