@@ -1430,6 +1430,10 @@ def handle_chat(new_message, pending_prompt, messages):
     # Strip leading punctuation artifacts (e.g. stray ] or ] \n left by token cleanup)
     agent_text = re.sub(r'^[\]\[)\s]+', '', agent_text).strip()
 
+    # list_rules: table is self-explanatory — suppress verbose text, keep brief intro
+    if any(name == "list_rules" for name, _, _ in chart_results):
+        agent_text = "Rule performance summary — detailed table shown below."
+
     if chart_results:
         content = [{"type": "text", "text": agent_text}] if agent_text else []
         for tool_name, tool_input, fig in chart_results:
