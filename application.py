@@ -1430,9 +1430,16 @@ def handle_chat(new_message, pending_prompt, messages):
     # Strip leading punctuation artifacts (e.g. stray ] or ] \n left by token cleanup)
     agent_text = re.sub(r'^[\]\[)\s]+', '', agent_text).strip()
 
-    # list_rules: table is self-explanatory — suppress verbose text, keep brief intro
+    # list_rules: strip the raw rule-list lines, keep only the model's closing insight
     if any(name == "list_rules" for name, _, _ in chart_results):
-        agent_text = "Rule performance summary — detailed table shown below."
+        # Remove lines that are part of the pre-computed rule list (contain "alerts=" and "precision=")
+        lines = (agent_text or "").splitlines()
+        insight_lines = [l for l in lines if not ("alerts=" in l and "precision=" in l and "FP=" in l)]
+        insight = " ".join(insight_lines).strip()
+        # Strip the NOTE instruction line if it leaked
+        insight = re.sub(r'NOTE:.*?listed here\.?\s*', '', insight, flags=re.DOTALL).strip()
+        insight = re.sub(r'Available AML rules[^:]*:[^\n]*\n?', '', insight, flags=re.IGNORECASE).strip()
+        agent_text = f"Rule performance summary — detailed table shown below.\n\n{insight}" if insight else "Rule performance summary — detailed table shown below."
 
     if chart_results:
         content = [{"type": "text", "text": agent_text}] if agent_text else []
