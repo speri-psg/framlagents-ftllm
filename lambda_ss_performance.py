@@ -487,9 +487,20 @@ def perform_clustering(df, customer_type=None, n_clusters=4):
     fig.update_layout(legend=dict(itemsizing='constant'))
 
     # ── Stats ────────────────────────────────────────────────────────────
+    _COL_DISPLAY = {
+        'avg_num_trxns':        'Avg Weekly Transactions',
+        'avg_weekly_trxn_amt':  'Avg Weekly Txn Amount ($)',
+        'trxn_amt_monthly':     'Monthly Txn Volume ($)',
+        'INCOME':               'Income ($)',
+        'CURRENT_BALANCE':      'Current Balance ($)',
+        'ACCT_AGE_YEARS':       'Account Age (years)',
+        'AGE':                  'Age',
+    }
+
     n_num         = len(numeric_cols)
     n_cat_encoded = len(df_encoded.columns)
     stats_lines = [
+        f"=== PRE-COMPUTED CLUSTER STATS (copy verbatim, do not compute new numbers) ===",
         f"Segment: {seg_label} | Active accounts: {len(df_active):,} (excluded {len(df_work) - len(df_active):,} with no transactions)",
         f"Clusters: {n_clusters} | Features: {n_num} numeric + {n_cat_encoded} encoded categorical ({len(cat_cols)} original)",
         f"PCA variance explained: PC1={var1:.1f}%, PC2={var2:.1f}%",
@@ -512,9 +523,11 @@ def perform_clustering(df, customer_type=None, n_clusters=4):
                 continue
             val = c[col].median()
             if not (val != val):  # skip NaN
-                stats_lines.append(f"- {col}: **{val:,.1f}**")
+                label = _COL_DISPLAY.get(col, col)
+                stats_lines.append(f"- {label}: **{val:,.1f}**")
         stats_lines.append("")  # blank line after each cluster block
 
+    stats_lines.append("=== END PRE-COMPUTED CLUSTER STATS ===")
     return fig, "\n".join(stats_lines), df_active
 
 

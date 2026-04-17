@@ -146,13 +146,16 @@ def _filter_treemap_node(node_id, df):
         df = df[df["customer_type"] == ct]
     if len(ct_parts) < 2:
         return df
-    dim_val = ct_parts[1]
-    for col in sorted(df.columns, key=len, reverse=True):
-        prefix = col + "_"
-        if dim_val.startswith(prefix):
-            val = dim_val[len(prefix):]
-            df = df[df[col].astype(str) == val]
-            break
+    # Handle multiple dim levels: ACCOUNT_TYPE_Other__GENDER_Male__AGE_CATEGORY_Senior...
+    for dim_val in ct_parts[1].split("__"):
+        if not dim_val:
+            continue
+        for col in sorted(df.columns, key=len, reverse=True):
+            prefix = col + "_"
+            if dim_val.startswith(prefix):
+                val = dim_val[len(prefix):]
+                df = df[df[col].astype(str) == val]
+                break
     return df
 
 
@@ -920,6 +923,8 @@ def _chart_content(tool_name, tool_input, fig):
         labels = [tool_name] * len(figs)
 
     for label, f in zip(labels, figs):
+        if f is None:
+            continue  # skip figures that failed to generate
         fig_h = f.layout.height if f.layout.height else 460
         blocks.append({"type": "text", "text": f"**{label}**"})
         blocks.append({
@@ -946,8 +951,10 @@ app = Dash(
 # ── Layout ────────────────────────────────────────────────────────────────────
 _sidebar = dbc.Card([
     dbc.CardBody([
-        html.H5("ARIA", className="fw-bold mb-1"),
-        html.P("Powered by Qwen2.5 via Ollama", className="text-muted small mb-3"),
+        html.H5([
+            html.B("A"), "gentic ", html.B("R"), "isk ", html.B("I"), "ntelligence for ", html.B("AML"),
+        ], className="mb-1"),
+        html.P("Powered by Aria 1.0 via Ollama", className="text-muted small mb-3"),
 
         html.Hr(className="my-2"),
 
@@ -1371,6 +1378,8 @@ def handle_chat(new_message, pending_prompt, messages):
     agent_text = re.sub(r'PRE-COMPUTED ANALYSIS[:\s]*\n?', '', agent_text).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED SEGMENT STATS.*?===\n?', '', agent_text).strip()
     agent_text = re.sub(r'===\s*END PRE-COMPUTED SEGMENT STATS\s*===\n?', '', agent_text).strip()
+    agent_text = re.sub(r'===.*?PRE-COMPUTED CLUSTER STATS.*?===\n?', '', agent_text).strip()
+    agent_text = re.sub(r'===\s*END PRE-COMPUTED CLUSTER STATS\s*===\n?', '', agent_text).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED SAR BACKTEST.*?===\n?', '', agent_text).strip()
     agent_text = re.sub(r'===\s*END PRE-COMPUTED SAR BACKTEST\s*===\n?', '', agent_text).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED RULE SWEEP.*?===\n?', '', agent_text).strip()
@@ -1379,12 +1388,27 @@ def handle_chat(new_message, pending_prompt, messages):
     agent_text = re.sub(r'===\s*END RULE LIST\s*===\n?', '', agent_text).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED 2D SWEEP.*?===\n?', '', agent_text).strip()
     agent_text = re.sub(r'===\s*END 2D SWEEP\s*===\n?', '', agent_text).strip()
+    # Catch any remaining PRE-COMPUTED lines not matched by the patterns above
+    # e.g. "PRE-COMPUTED SAR BACKTEST (copy this verbatim, do not alter numbers) ==="
+    agent_text = re.sub(r'^PRE-COMPUTED [^\n]+\n?', '', agent_text, flags=re.MULTILINE).strip()
     # Strip Gemma 4 self-review chain-of-thought block
     agent_text = re.sub(r'\(Self-Correction.*?The response aligns with all rules\.\s*', '', agent_text, flags=re.DOTALL).strip()
     agent_text = re.sub(r'\(Self-Correction.*?\)\s*', '', agent_text, flags=re.DOTALL).strip()
-    # Strip <channel|> and similar Gemma 4 control tokens
-    agent_text = re.sub(r'<channel\|[^>]*>', '', agent_text).strip()
-    agent_text = re.sub(r'<channel\|>', '', agent_text).strip()
+    # Gemma 4 separator tokens: <channel|...> and <tool_call|> mark the boundary
+    # between internal reasoning / tool-echo and the actual output.
+    # Keep only what comes AFTER the last such token.
+    _sep_match = list(re.finditer(r'<(?:channel|tool_call)\|[^>]*>', agent_text))
+    if not _sep_match:
+        # Also check bare <tool_call|> with no closing >
+        _sep_match = list(re.finditer(r'<(?:channel|tool_call)\|>', agent_text))
+    if _sep_match:
+        agent_text = agent_text[_sep_match[-1].end():].strip()
+    # Strip Gemma 4 string-delimiter tokens: <|"|>
+    agent_text = re.sub(r'<\|"\|>', '', agent_text).strip()
+    # Strip any remaining raw tool-call echo: tool_name{value:...} prefix
+    agent_text = re.sub(r'^\w+\{value:.*?\}\s*', '', agent_text, flags=re.DOTALL).strip()
+    # Strip leading punctuation artifacts (e.g. stray ] or ] \n left by token cleanup)
+    agent_text = re.sub(r'^[\]\[)\s]+', '', agent_text).strip()
 
     if chart_results:
         content = [{"type": "text", "text": agent_text}] if agent_text else []
