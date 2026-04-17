@@ -100,17 +100,17 @@ class OrchestratorAgent:
 
     _GREETING = (
         "Hello! I'm ARIA — Agentic Risk Intelligence for AML. I can help you with:\n"
-        "- **Threshold tuning** — FP/FN trade-off analysis\n"
-        "- **Customer segmentation** — K-Means clustering\n"
-        "- **AML policy Q&A** — compliance and regulatory questions\n\n"
+        "- **Threshold tuning** — optimize your alert investigation budget by analyzing FP/FN trade-offs, SAR catch rates, and rule sweep performance across threshold parameters\n"
+        "- **Customer segmentation** — identify behavioral risk clusters using K-Means across transaction velocity, volume, and account characteristics\n"
+        "- **AML policy Q&A** — answer questions on BSA/AML regulations, FFIEC examination guidance, FinCEN advisories, and Wolfsberg Group best practices\n\n"
         "Try one of the suggested prompts on the left, or ask me a question."
     )
 
     _OUT_OF_SCOPE = (
         "I can only help with AML-specific topics:\n"
-        "- **Threshold tuning** — FP/FN trade-off analysis\n"
-        "- **Customer segmentation** — K-Means clustering\n"
-        "- **AML policy Q&A** — compliance and regulatory questions\n\n"
+        "- **Threshold tuning** — FP/FN trade-off analysis, SAR catch rates, rule sweep optimization\n"
+        "- **Customer segmentation** — K-Means behavioral clustering, alert distribution by segment\n"
+        "- **AML policy Q&A** — BSA/AML regulations, FFIEC guidance, FinCEN advisories\n\n"
         "Please rephrase your question around one of these areas."
     )
 

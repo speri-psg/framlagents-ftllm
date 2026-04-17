@@ -1398,8 +1398,12 @@ def handle_chat(new_message, pending_prompt, messages):
     # Catch any remaining PRE-COMPUTED lines not matched by the patterns above
     # e.g. "PRE-COMPUTED SAR BACKTEST (copy this verbatim, do not alter numbers) ==="
     agent_text = re.sub(r'^PRE-COMPUTED [^\n]+\n?', '', agent_text, flags=re.MULTILINE).strip()
-    # Strip leaked instruction phrases from PRE-COMPUTED blocks
+    # Strip leaked instruction phrases and model meta-complaints
     agent_text = re.sub(r'^(Displaying|Tool call successful)[^\n]*\n?', '', agent_text, flags=re.MULTILINE | re.IGNORECASE).strip()
+    agent_text = re.sub(r'\[/PRE-COMPUTED RESULTS\]\s*', '', agent_text).strip()
+    agent_text = re.sub(r'\b(chart|heatmap|table|graph)\s+(shown|displayed)\s+above\b', r'\1 shown below', agent_text, flags=re.IGNORECASE)
+    agent_text = re.sub(r'^NOTE: Data is simulated[^\n]*\n?', '', agent_text, flags=re.MULTILINE | re.IGNORECASE).strip()
+    agent_text = re.sub(r'^The tool output is incomplete.*?verbatim\.\s*', '', agent_text, flags=re.DOTALL | re.IGNORECASE).strip()
     # Strip cluster report decorative lines and section markers
     agent_text = re.sub(r'^=+\s*(AML DYNAMIC SEGMENTATION REPORT|End Cluster Analysis)\s*\n?', '', agent_text, flags=re.MULTILINE).strip()
     agent_text = re.sub(r'^Cluster Summary\s*[—-]\s*\w+\s*\n?', '', agent_text, flags=re.MULTILINE).strip()

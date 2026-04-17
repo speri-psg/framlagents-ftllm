@@ -351,6 +351,7 @@ def list_rules_text(df):
     """
     lines = ["=== PRE-COMPUTED RULE LIST (copy this verbatim) ==="]
     lines.append("Available AML rules with SAR/FP performance (detailed table shown in chart below):")
+    lines.append("NOTE: This is the COMPLETE list of rules in the system. Do NOT add or infer any rules not listed here.")
 
     for _, entry in RULE_CATALOGUE.items():
         rf   = entry["name"]
