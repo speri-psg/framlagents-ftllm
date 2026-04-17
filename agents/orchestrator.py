@@ -203,9 +203,19 @@ class OrchestratorAgent:
 
         # OFAC screening is handled directly via tool_executor (no specialist agent)
         if "ofac" in labels:
-            text, fig = tool_executor("ofac_screening", {})
-            chart_results = [("ofac_screening", {}, fig)] if fig is not None else []
-            return text, chart_results
+            # Detect name lookup: 2+ capitalised words that look like a person/entity name
+            import re as _re
+            _name_match = _re.search(
+                r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b', query
+            )
+            if _name_match:
+                name = _name_match.group(1)
+                text, fig = tool_executor("ofac_name_lookup", {"name": name})
+            else:
+                text, fig = tool_executor("ofac_screening", {})
+                chart_results = [("ofac_screening", {}, fig)] if fig is not None else []
+                return text, chart_results
+            return text, []
 
         agent_labels = [l for l in labels if l in self._agent_map]
 

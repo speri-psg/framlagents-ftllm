@@ -16,6 +16,7 @@ import sqlite3
 import pandas as pd
 import plotly.graph_objects as go
 from config import OFAC_DB, CUSTOMERS_CSV
+from ofac_fuzzy import screen_name as _fuzzy_screen, format_results as _fuzzy_format
 
 # ── Sanctioned country classification ─────────────────────────────────────────
 COMPREHENSIVE = {"Iran", "North Korea", "Cuba", "Syria"}
@@ -207,3 +208,17 @@ def _ofac_bar_chart(by_ctz: pd.DataFrame, total: int) -> go.Figure:
         ],
     )
     return fig
+
+
+def screen_name(name: str, threshold: float = 85) -> tuple:
+    """
+    Screen a single name against the OFAC SDN list using fuzzy matching.
+
+    Returns (text, None) — no chart for name lookups.
+    """
+    try:
+        hits = _fuzzy_screen(name, OFAC_DB, threshold=threshold)
+        text = _fuzzy_format(name, hits, threshold)
+        return text, None
+    except Exception as e:
+        return f"OFAC name screening error: {e}", None

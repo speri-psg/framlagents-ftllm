@@ -175,6 +175,50 @@ cur.executemany(
       r["country"], r["sanction_type"], r["dob"], r["pob"],
       r["nationality"], r["aliases"], r["remarks"]) for r in records]
 )
+
+# ── Phonetic index for fuzzy name screening ────────────────────────────────────
+print("[phonetic] Building Double Metaphone index...")
+try:
+    import jellyfish
+    import re as _re
+    _NOISE = {"AL", "EL", "BIN", "BEN", "ABU", "UL", "UR", "JR", "SR", "II", "III"}
+    _STRIP = _re.compile(r"[^A-Za-z0-9 ]")
+
+    def _tokens(name):
+        clean = _STRIP.sub(" ", name).upper()
+        return [t for t in clean.split() if len(t) > 1 and t not in _NOISE]
+
+    def _codes(name):
+        codes = set()
+        for tok in _tokens(name):
+            p, s = jellyfish.double_metaphone(tok)
+            if p: codes.add(p)
+            if s: codes.add(s)
+        return codes
+
+    cur.execute("""
+        CREATE TABLE sdn_phonetic (
+            ent_num TEXT,
+            code    TEXT
+        )
+    """)
+    cur.execute("CREATE INDEX idx_phonetic_code ON sdn_phonetic(code)")
+
+    phonetic_rows = []
+    for r in records:
+        all_names = [r["name"]] + [a.strip() for a in r["aliases"].split("|") if a.strip()]
+        seen_codes = set()
+        for nm in all_names:
+            for code in _codes(nm):
+                if code not in seen_codes:
+                    seen_codes.add(code)
+                    phonetic_rows.append((r["ent_num"], code))
+
+    cur.executemany("INSERT INTO sdn_phonetic VALUES (?,?)", phonetic_rows)
+    print(f"  Phonetic rows: {len(phonetic_rows):,}")
+except ImportError:
+    print("  WARNING: jellyfish not installed — skipping phonetic index (pip install jellyfish)")
+
 con.commit()
 con.close()
 print(f"[wrote] {OUT_DB}")

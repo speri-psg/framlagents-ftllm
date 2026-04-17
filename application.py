@@ -830,6 +830,11 @@ def tool_executor(tool_name, tool_input):
         filter_type = tool_input.get("filter_type", "all")
         return lambda_ofac.ofac_screening(filter_type=filter_type)
 
+    elif tool_name == "ofac_name_lookup":
+        name      = tool_input.get("name", "")
+        threshold = float(tool_input.get("threshold", 85))
+        return lambda_ofac.screen_name(name, threshold=threshold)
+
     return f"Unknown tool: {tool_name}", None
 
 
