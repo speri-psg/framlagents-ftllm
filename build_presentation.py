@@ -1,5 +1,5 @@
 """
-Build FRAML AI Assistant presentation for executives and compliance teams.
+Build ARIA presentation for executives and compliance teams.
 Output: framl_ai_presentation.pptx
 """
 
@@ -262,10 +262,10 @@ slide = prs.slides.add_slide(blank_layout)
 add_rect(slide, 0, 0, 13.33, 7.5, fill=DARK_BLUE)
 add_rect(slide, 0, 3.3, 13.33, 0.08, fill=ORANGE)
 add_textbox(slide, 1.0, 1.5, 11.0, 1.2,
-            "FRAML AI Assistant",
+            "ARIA",
             size=44, bold=True, color=WHITE, align=PP_ALIGN.CENTER)
 add_textbox(slide, 1.0, 2.8, 11.0, 0.7,
-            "Smart Segmentation  ·  Threshold Tuning  ·  AML Policy Q&A",
+            "Dynamic Segmentation  ·  Threshold Tuning  ·  AML Policy Q&A",
             size=20, bold=False, color=LIGHT_BLUE, align=PP_ALIGN.CENTER)
 add_textbox(slide, 1.0, 3.6, 11.0, 0.5,
             "Executive & Compliance Overview",
@@ -644,7 +644,7 @@ add_rect(slide, 0, 1.18, 13.33, 0.06, fill=ORANGE)
 footer(slide)
 
 demo_items = [
-    ("Smart Segmentation", "Cluster Business customers into 4 groups\nIdentify highest-risk segment\nTreemap visualisation"),
+    ("Dynamic Segmentation", "Cluster Business customers into 4 groups\nIdentify highest-risk segment\nTreemap visualisation"),
     ("Threshold Tuning", "FP/FN sweep for Individual AVG_TRXN_AMT\nCrossover point analysis\nSAR backtest at 90% catch rate"),
     ("Policy Q&A", "Query structuring detection policy\nCitation from FFIEC Manual\nKB disclaimer behaviour"),
 ]
