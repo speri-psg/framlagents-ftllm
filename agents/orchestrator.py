@@ -9,6 +9,7 @@ Routing is done via LLM classification (single fast API call):
   out_of_scope → polite refusal (no agent run)
 """
 
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from openai import OpenAI
 
@@ -194,7 +195,7 @@ class OrchestratorAgent:
                 labels = ["segmentation"]
             elif any(w in q for w in ["policy", "compliance", "regulation", "bsa", "aml", "wolfsberg", "fincen", "structuring"]):
                 labels = ["policy"]
-            elif any(w in q for w in ["hello", "hi", "hey", "howdy", "greetings"]):
+            elif any(re.fullmatch(w, tok) for w in ["hello", "hi", "hey", "howdy", "greetings"] for tok in q.split()):
                 labels = ["greeting"]
             else:
                 labels = ["out_of_scope"]
