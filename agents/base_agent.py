@@ -235,6 +235,17 @@ class BaseAgent:
 
             # ── Execute tool calls ────────────────────────────────────────────
             if structured_calls:
+                # Deduplicate: same tool + same args called twice in one response
+                seen = set()
+                deduped = []
+                for item in structured_calls:
+                    key = (item[0], str(item[1]))
+                    if key not in seen:
+                        seen.add(key)
+                        deduped.append(item)
+                if len(deduped) < len(structured_calls):
+                    print(f"[{self.name}] deduplicated {len(structured_calls) - len(deduped)} duplicate tool call(s)")
+                structured_calls = deduped
                 for name, args, tc_id in structured_calls:
                     print(f"[{self.name}] tool call: {name}({args})")
                     result_text, fig = tool_executor(name, args)
