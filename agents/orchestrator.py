@@ -165,6 +165,15 @@ class OrchestratorAgent:
             labels = ["threshold"]
             print("[orchestrator] keyword override → threshold (rescued from out_of_scope)")
 
+        # Prevent data questions from being classified as greeting
+        is_data_question = any(w in q_lower for w in [
+            "show me", "can you show", "credit", "score", "income", "balance",
+            "distribution", "customers", "average", "what is the",
+        ])
+        if "greeting" in labels and is_data_question:
+            labels = ["out_of_scope"]
+            print("[orchestrator] keyword override → out_of_scope (data question misclassified as greeting)")
+
         # OFAC keyword override — always catch sanctions/OFAC queries
         is_ofac = any(w in q_lower for w in [
             "ofac", "sdn", "sanctions", "sanctioned", "sanction list",
