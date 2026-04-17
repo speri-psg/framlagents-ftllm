@@ -472,9 +472,14 @@ def perform_clustering(df, customer_type=None, n_clusters=4):
         'PC2':     X_pca[:, 1],
         'Cluster': [f'Cluster {l+1}' for l in labels],
     })
+    # Sort so legend appears in numeric order (1, 2, 3, 4) regardless of KMeans label assignment
+    cluster_order = [f'Cluster {i+1}' for i in range(n_clusters)]
+    scatter_df['Cluster'] = pd.Categorical(scatter_df['Cluster'], categories=cluster_order, ordered=True)
+    scatter_df = scatter_df.sort_values('Cluster')
 
     fig = px.scatter(
         scatter_df, x='PC1', y='PC2', color='Cluster',
+        category_orders={'Cluster': cluster_order},
         title=f"Dynamic Segmentation Clustering — {seg_label} ({n_clusters} clusters, active accounts only)",
         labels={
             'PC1': f'PC1 ({var1:.1f}% variance)',
