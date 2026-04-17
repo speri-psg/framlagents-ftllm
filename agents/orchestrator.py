@@ -193,13 +193,18 @@ class OrchestratorAgent:
                 labels = ["threshold"]
             elif any(w in q for w in ["cluster", "segment", "k-means", "kmeans", "treemap"]):
                 labels = ["segmentation"]
-            elif any(w in q for w in ["policy", "compliance", "regulation", "bsa", "aml", "wolfsberg", "fincen", "structuring"]):
+            elif any(w in q for w in ["policy", "compliance", "regulation", "bsa", "aml", "wolfsberg", "fincen", "structuring", "bank secrecy", "anti-money", "anti money", "know your customer", "kyc", "cdd", "due diligence", "suspicious activity", "currency transaction"]):
                 labels = ["policy"]
             elif any(re.fullmatch(w, tok) for w in ["hello", "hi", "hey", "howdy", "greetings"] for tok in q.split()):
                 labels = ["greeting"]
             else:
                 labels = ["out_of_scope"]
             print(f"[orchestrator] keyword fallback labels: {labels}")
+
+        # Final guard: data questions must never route to greeting
+        if "greeting" in labels and is_data_question:
+            labels = ["out_of_scope"]
+            print("[orchestrator] post-fallback override → out_of_scope (data question)")
 
         print(f"[orchestrator] routing to: {labels}")
         return labels
