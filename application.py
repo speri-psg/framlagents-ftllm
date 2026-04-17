@@ -1400,6 +1400,8 @@ def handle_chat(new_message, pending_prompt, messages):
     # Strip leaked instruction phrases and model meta-complaints
     agent_text = re.sub(r'^(Displaying|Tool call successful)[^\n]*\n?', '', agent_text, flags=re.MULTILINE | re.IGNORECASE).strip()
     agent_text = re.sub(r'\[/PRE-COMPUTED RESULTS\]\s*', '', agent_text).strip()
+    agent_text = re.sub(r'\[/Tool Output\]\s*', '', agent_text).strip()
+    agent_text = re.sub(r'\[Tool Output\]\s*', '', agent_text).strip()
     agent_text = re.sub(r'\b(chart|heatmap|table|graph)\s+(shown|displayed)\s+above\b', r'\1 shown below', agent_text, flags=re.IGNORECASE)
     agent_text = re.sub(r'^NOTE: Data is simulated[^\n]*\n?', '', agent_text, flags=re.MULTILINE | re.IGNORECASE).strip()
     agent_text = re.sub(r'^The tool output is incomplete.*?verbatim\.\s*', '', agent_text, flags=re.DOTALL | re.IGNORECASE).strip()
