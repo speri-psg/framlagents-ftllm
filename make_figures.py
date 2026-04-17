@@ -692,7 +692,7 @@ def cluster_profile_table(df_clustered, target_cluster):
     rows = []
     for cid, grp in sorted(df_clustered.groupby("cluster")):
         display_id = int(cid) + 1  # convert 0-indexed → 1-indexed
-        row = {"Cluster": f"Cluster {display_id}", "n": len(grp)}
+        row = {"Cluster": f"Cluster {display_id}", "Num Customers": len(grp)}
         for col in numeric_cols:
             row[col] = round(grp[col].median(), 1)
         rows.append(row)
@@ -722,7 +722,7 @@ def cluster_profile_table(df_clustered, target_cluster):
 
     # Format numeric values
     def _fmt_col(series, col_name):
-        if col_name == "n":
+        if col_name == "Num Customers":
             return [f"{int(v):,}" for v in series]
         if col_name in ("ACCT_AGE_YEARS", "AGE"):
             return [f"{v:.1f}" for v in series]
@@ -774,7 +774,7 @@ def cluster_stats_table(df_clustered, customer_type="All"):
     for cid, grp in sorted(df_clustered.groupby("cluster")):
         display_id = int(cid) + 1  # convert 0-indexed → 1-indexed
         pct  = round(100 * len(grp) / total_n, 1) if total_n > 0 else 0.0
-        row  = {"Cluster": f"Cluster {display_id}", "n": len(grp), "% of Active": f"{pct}%"}
+        row  = {"Cluster": f"Cluster {display_id}", "Num Customers": len(grp), "% of Active": f"{pct}%"}
         for col in numeric_cols:
             row[col] = round(grp[col].median(), 1)
         rows.append(row)
@@ -793,7 +793,7 @@ def cluster_stats_table(df_clustered, customer_type="All"):
     def _fmt_col(series, col_name):
         if col_name in ("Cluster", "% of Active"):
             return list(series)
-        if col_name == "n":
+        if col_name == "Num Customers":
             return [f"{int(v):,}" for v in series]
         if col_name in ("ACCT_AGE_YEARS", "AGE"):
             return [f"{v:.1f}" for v in series]
