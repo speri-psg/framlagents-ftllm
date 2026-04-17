@@ -161,6 +161,9 @@ class OrchestratorAgent:
         elif is_rule_query and "policy" in labels and "threshold" in labels:
             labels = ["threshold"]
             print("[orchestrator] keyword override → threshold (rule query, dropped policy)")
+        elif "out_of_scope" in labels and (is_threshold or is_rule_query) and not is_segmentation:
+            labels = ["threshold"]
+            print("[orchestrator] keyword override → threshold (rescued from out_of_scope)")
 
         # OFAC keyword override — always catch sanctions/OFAC queries
         is_ofac = any(w in q_lower for w in [

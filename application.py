@@ -1066,6 +1066,7 @@ _chat_panel = html.Div([
         id="chat-component",
         messages=[],
         class_name="AML AI",
+        assistant_bubble_style={"maxWidth": "100%", "width": "100%"},
     )
 ], id="chat-scroll-container", style={
     "height": "calc(100vh - 80px)",
@@ -1334,6 +1335,7 @@ def handle_chat(new_message, pending_prompt, messages):
             ""
         )
         agent_text, chart_results = orchestrator.run(query, tool_executor, last_assistant)
+        print(f"[app] raw agent_text ({len(agent_text or '')} chars): {repr((agent_text or '')[:300])}")
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -1396,6 +1398,12 @@ def handle_chat(new_message, pending_prompt, messages):
     # Catch any remaining PRE-COMPUTED lines not matched by the patterns above
     # e.g. "PRE-COMPUTED SAR BACKTEST (copy this verbatim, do not alter numbers) ==="
     agent_text = re.sub(r'^PRE-COMPUTED [^\n]+\n?', '', agent_text, flags=re.MULTILINE).strip()
+    # Strip leaked instruction phrases from PRE-COMPUTED blocks
+    agent_text = re.sub(r'^(Displaying|Tool call successful)[^\n]*\n?', '', agent_text, flags=re.MULTILINE | re.IGNORECASE).strip()
+    # Strip cluster report decorative lines and section markers
+    agent_text = re.sub(r'^=+\s*(AML DYNAMIC SEGMENTATION REPORT|End Cluster Analysis)\s*\n?', '', agent_text, flags=re.MULTILINE).strip()
+    agent_text = re.sub(r'^Cluster Summary\s*[—-]\s*\w+\s*\n?', '', agent_text, flags=re.MULTILINE).strip()
+    agent_text = re.sub(r'^=+\s*\n?', '', agent_text, flags=re.MULTILINE).strip()
     # Strip Gemma 4 self-review chain-of-thought block
     agent_text = re.sub(r'\(Self-Correction.*?The response aligns with all rules\.\s*', '', agent_text, flags=re.DOTALL).strip()
     agent_text = re.sub(r'\(Self-Correction.*?\)\s*', '', agent_text, flags=re.DOTALL).strip()
@@ -1412,6 +1420,8 @@ def handle_chat(new_message, pending_prompt, messages):
     agent_text = re.sub(r'<\|"\|>', '', agent_text).strip()
     # Strip any remaining raw tool-call echo: tool_name{value:...} prefix
     agent_text = re.sub(r'^\w+\{value:.*?\}\s*', '', agent_text, flags=re.DOTALL).strip()
+    # Strip self-generated JSON tool result blocks: {"risk_factor": ..., "pre_computed": ...}
+    agent_text = re.sub(r'^\{[^{}]*"(?:risk_factor|pre_computed|sweep_param)[^{}]*\}', '', agent_text, flags=re.DOTALL).strip()
     # Strip leading punctuation artifacts (e.g. stray ] or ] \n left by token cleanup)
     agent_text = re.sub(r'^[\]\[)\s]+', '', agent_text).strip()
 

@@ -241,18 +241,12 @@ class BaseAgent:
                     if fig is not None:
                         chart_results.append((name, args, fig))
 
-                    # Use tool role for structured calls, user role for fallback
-                    if tc_id.startswith("fallback_"):
-                        messages.append({
-                            "role": "user",
-                            "content": f"Tool result for {name}:\n{result_text}",
-                        })
-                    else:
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tc_id,
-                            "content": result_text,
-                        })
+                    # Always use user role for tool results — Gemma 4 responds to
+                    # <start_of_turn>tool with <eos> (trained on user-role tool results)
+                    messages.append({
+                        "role": "user",
+                        "content": f"Tool result for {name}:\n{result_text}",
+                    })
 
                 tool_call_count += 1
                 create_kwargs["messages"] = messages
