@@ -179,6 +179,44 @@ CASES = [
     Case("O03", "Can you show me credit scores for high-risk customers?",
          SYSTEM_GENERAL, None,
          note="should be plain text decline"),
+
+    Case("O04", "Show FP/FN trade-off for Business customers by daily balance",
+         SYSTEM_THRESHOLD, None,
+         note="invalid column — should be plain text decline with alternatives"),
+
+    # Sanctions / OFAC routing
+    Case("X01", "What happens when a customer hits the OFAC SDN list?",
+         SYSTEM_POLICY, "search_policy_kb", {},
+         human_eval=True),
+
+    Case("X02", "What is the process for handling a sanctions screening hit?",
+         SYSTEM_POLICY, "search_policy_kb", {},
+         human_eval=True),
+
+    Case("X03", "How many customers in our portfolio have OFAC hits?",
+         SYSTEM_POLICY, None,
+         note="data not in system — should be plain text decline with redirect"),
+
+    # New rule typologies — SAR backtest routing
+    Case("N01", "Run SAR backtest for Funnel Account rule",
+         SYSTEM_RULE, "rule_sar_backtest",
+         {"risk_factor": "Funnel"}),
+
+    Case("N02", "Show SAR analysis for Human Trafficking Indicators",
+         SYSTEM_RULE, "rule_sar_backtest",
+         {"risk_factor": "Human Trafficking"}),
+
+    Case("N03", "What is the SAR catch rate for Round-trip rule?",
+         SYSTEM_RULE, "rule_sar_backtest",
+         {"risk_factor": "Round"}),
+
+    Case("N04", "Run SAR backtest for Velocity Multiple",
+         SYSTEM_RULE, "rule_sar_backtest",
+         {"risk_factor": "Velocity Multiple"}),
+
+    Case("N05", "Show 2D sweep for Funnel Account rule",
+         SYSTEM_RULE, "rule_2d_sweep",
+         {"risk_factor": "Funnel"}),
 ]
 
 # ---------------------------------------------------------------------------
@@ -212,7 +250,7 @@ def extract_tool_call(content: str) -> Optional[tuple]:
     if not content:
         return None
 
-    # Format 1: Gemma 4 native — call:tool_name\n{...}
+    # Format 1: Gemma 4 native — call:tool_name\n{...} (with newline)
     m = re.search(
         r'call:(\w+)\s*\n\s*(\{(?:[^{}]|\{[^{}]*\})*\})',
         content, re.DOTALL
@@ -220,6 +258,26 @@ def extract_tool_call(content: str) -> Optional[tuple]:
     if m:
         try:
             args = json.loads(m.group(2))
+            return m.group(1), args
+        except Exception:
+            pass
+
+    # Format 6: Gemma 4 template native — <|tool_call>call:NAME{...}<tool_call|>
+    # Template renders args as JSON string directly adjacent (no newline)
+    m = re.search(r'<\|tool_call>call:(\w+)\{(.*?)\}<tool_call\|>', content, re.DOTALL)
+    if m:
+        try:
+            args = json.loads("{" + m.group(2) + "}")
+            return m.group(1), args
+        except Exception:
+            # args may be key:value pairs not JSON — try bare call:name{} fallback
+            pass
+
+    # Format 6b: call:NAME{...} no delimiters, no newline
+    m = re.search(r'call:(\w+)\{((?:[^{}]|\{[^{}]*\})*)\}', content, re.DOTALL)
+    if m:
+        try:
+            args = json.loads("{" + m.group(2) + "}")
             return m.group(1), args
         except Exception:
             pass
