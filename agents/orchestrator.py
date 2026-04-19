@@ -176,13 +176,22 @@ class OrchestratorAgent:
             print("[orchestrator] keyword override → out_of_scope (data question misclassified as greeting)")
 
         # OFAC keyword override — always catch sanctions/OFAC queries
+        # Exception: "which/how many customers have OFAC hits" = data query → policy decline
+        _ofac_data_query = any(p in q_lower for p in [
+            "which customers", "how many customers", "list customers",
+            "customers have ofac", "customers with ofac", "customers on the",
+            "portfolio have", "how many have",
+        ])
         is_ofac = any(w in q_lower for w in [
             "ofac", "sdn", "sanctions", "sanctioned", "sanction list",
             "iran exposure", "north korea exposure", "dprk", "SDN list",
         ])
-        if is_ofac:
+        if is_ofac and not _ofac_data_query:
             labels = ["ofac"]
             print("[orchestrator] keyword override → ofac")
+        elif is_ofac and _ofac_data_query:
+            labels = ["policy"]
+            print("[orchestrator] keyword override → policy (OFAC data query)")
 
         # Keyword fallback when fine-tuned model ignores classification prompt
         if not labels:
