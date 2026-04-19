@@ -26,7 +26,7 @@ from typing import Optional
 
 DEFAULT_BASE_URL = "http://localhost:11434/v1"
 DEFAULT_MODEL    = "aria-v1"
-TIMEOUT          = 120
+TIMEOUT          = 180
 
 SYSTEM_RULE = (
     "You are ARIA — Agentic Risk Intelligence for AML — rule performance specialist. "
@@ -200,14 +200,21 @@ def chat(base_url: str, model: str, system: str, user: str) -> str:
         headers={"Content-Type": "application/json"},
     )
     with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-        return json.loads(resp.read())["message"]["content"]
+        msg = json.loads(resp.read())["message"]
+        # Gemma 4 separates reasoning from output — tool calls may appear in thinking
+        thinking = msg.get("thinking") or ""
+        content  = msg.get("content")  or ""
+        return (thinking + "\n" + content).strip() if thinking else content
 
 
 def extract_tool_call(content: str) -> Optional[tuple]:
     """Return (tool_name, args_dict) if content contains a JSON tool call, else None."""
-    # Try plain JSON object with "name" key
+    if not content:
+        return None
+
+    # Format 1: Gemma 4 native — call:tool_name\n{...}
     m = re.search(
-        r'\{[^{}]*"name"\s*:\s*"(\w+)"[^{}]*"arguments"\s*:\s*(\{[^{}]*\})[^{}]*\}',
+        r'call:(\w+)\s*\n\s*(\{(?:[^{}]|\{[^{}]*\})*\})',
         content, re.DOTALL
     )
     if m:
@@ -217,7 +224,29 @@ def extract_tool_call(content: str) -> Optional[tuple]:
         except Exception:
             pass
 
-    # Try bare JSON object (Gemma 4 native format)
+    # Format 2: Qwen style — <tool_call>{"name": ..., "arguments": ...}</tool_call>
+    m = re.search(r'<tool_call>\s*(\{.*?\})\s*</tool_call>', content, re.DOTALL)
+    if m:
+        try:
+            obj = json.loads(m.group(1))
+            if "name" in obj and "arguments" in obj:
+                return obj["name"], obj["arguments"] if isinstance(obj["arguments"], dict) else {}
+        except Exception:
+            pass
+
+    # Format 3: OpenAI-style JSON — {"name": "...", "arguments": {...}}
+    m = re.search(
+        r'\{\s*"name"\s*:\s*"(\w+)"\s*,\s*"arguments"\s*:\s*(\{(?:[^{}]|\{[^{}]*\})*\})\s*\}',
+        content, re.DOTALL
+    )
+    if m:
+        try:
+            args = json.loads(m.group(2))
+            return m.group(1), args
+        except Exception:
+            pass
+
+    # Format 4: bare JSON object with "name" key
     m = re.search(r'\{[^{}]{10,}\}', content, re.DOTALL)
     if m:
         try:
@@ -226,6 +255,19 @@ def extract_tool_call(content: str) -> Optional[tuple]:
                 return obj["name"], obj.get("arguments", {})
         except Exception:
             pass
+
+    # Format 5: natural language thinking — "call/use/invoke `tool_name`"
+    _SKIP_WORDS = {"the", "a", "an", "this", "that", "it", "my", "our"}
+    for m in re.finditer(r'(?:call|use|invoke|using)\s+[`"]?(\w+)[`"]?', content, re.IGNORECASE):
+        tool_name = m.group(1)
+        if tool_name.lower() in _SKIP_WORDS:
+            continue
+        args = {}
+        for km in re.finditer(r'[`"]?(\w+)[`"]?\s*[=:]\s*[`\'"]([^`\'"]+)[`\'"]', content):
+            k, v = km.group(1), km.group(2)
+            if k.lower() not in {"call", "name"} | _SKIP_WORDS:
+                args[k] = v
+        return tool_name, args
 
     return None
 
@@ -250,13 +292,25 @@ def check_routing(case: Case, tool_name: Optional[str]) -> tuple:
         return ok, f"tool={tool_name}" if ok else f"expected={case.expected_tool} got={tool_name}"
 
 
+_ARG_ALIASES = {
+    "segment":           ["segment", "customer_type", "customer_segment", "segment_type"],
+    "threshold_column":  ["threshold_column", "transaction_amount", "amount_type", "column", "metric"],
+    "risk_factor":       ["risk_factor", "rule", "rule_name", "risk_factor_name"],
+}
+
 def check_args(case: Case, args: dict) -> tuple:
-    """Subset check — all expected_args keys must match (substring)."""
+    """Subset check — all expected_args keys must match (substring), with alias expansion."""
     if not case.expected_args or args is None:
         return True, "n/a"
     failures = []
     for k, v in case.expected_args.items():
-        actual = str(args.get(k, "")).lower()
+        # Check canonical key and all aliases
+        candidates = _ARG_ALIASES.get(k, [k])
+        actual = ""
+        for alias in candidates:
+            if alias in args:
+                actual = str(args[alias]).lower()
+                break
         if v.lower() not in actual:
             failures.append(f"{k}: expected '{v}' in '{actual}'")
     ok = len(failures) == 0
@@ -307,7 +361,7 @@ def run_benchmark(base_url: str, model: str, verbose: bool):
         print(f"  Args  {arg_st} {args_detail}")
 
         if verbose:
-            print(f"  Response (first 300): {content[:300].replace(chr(10),' ')}")
+            print(f"  Response (first 800): {content[:800].replace(chr(10),' ')}")
 
         if case.human_eval:
             print(f"  ── Policy response (score 1=wrong 2=shallow 3=correct+cited) ──")

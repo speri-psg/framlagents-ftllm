@@ -23,13 +23,27 @@ import numpy as np
 _HERE        = os.path.dirname(os.path.abspath(__file__))
 _CSV         = os.path.join(_HERE, "docs", "rule_sweep_data.csv")
 _THRESHOLDS  = os.path.join(_HERE, "rule_thresholds.json")
+_CATALOGUE   = os.path.join(_HERE, "config", "rule_catalogue.json")
 
 MAX_SWEEP_ROWS = 12
 
 # ── Rule catalogue ─────────────────────────────────────────────────────────────
+# Loaded from config/rule_catalogue.json — add new rules there, no code changes needed.
 # Maps lower-cased keyword -> canonical risk_factor name + sweepable params
 
-RULE_CATALOGUE = {
+def _load_catalogue() -> dict:
+    with open(_CATALOGUE, "r", encoding="utf-8") as f:
+        raw = json.load(f)
+    # Convert default_2d lists to tuples (preserves original type used in code)
+    for entry in raw.values():
+        if isinstance(entry.get("default_2d"), list):
+            entry["default_2d"] = tuple(entry["default_2d"])
+    return raw
+
+RULE_CATALOGUE = _load_catalogue()
+
+# ── Legacy inline catalogue (kept for reference, no longer used) ───────────────
+_LEGACY_CATALOGUE = {
     "activity deviation (ach)": {
         "name":        "Activity Deviation (ACH)",
         "current":     "Monthly Outgoing ACH >= $50K AND >= 5 std dev above 12-month profile mean",
@@ -297,7 +311,7 @@ RULE_CATALOGUE = {
         "default_sweep": "floor_amount",
         "default_2d":    ("floor_amount", "floor_amount"),
     },
-}
+}  # end _LEGACY_CATALOGUE — not used; kept for reference only
 
 
 def _load_thresholds():
