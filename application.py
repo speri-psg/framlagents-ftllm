@@ -1910,4 +1910,4 @@ def show_network_graph(active_cell, table_data, is_open):
 
 
 if __name__ == "__main__":
-    app.run(debug=False, port=7860, host="0.0.0.0", use_reloader=False)
+    app.run(debug=False, port=7860, host="0.0.0.0", use_reloader=False, threaded=True)
