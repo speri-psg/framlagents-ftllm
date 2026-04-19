@@ -152,8 +152,8 @@ def _parse_tool_call_from_content(content: str) -> tuple | None:
         except json.JSONDecodeError:
             pass
 
-    # Format 7: Gemma 4 native tool_code — <eos>tool_code print(func(kwargs))<unused##>
-    m = re.search(r'<eos>tool_code\s+print\((\w+)\((.*?)\)\)', content, re.DOTALL)
+    # Format 7: Gemma 4 native tool_code — [<eos>]tool_code print(func(kwargs))
+    m = re.search(r'(?:<eos>)?tool_code\s+print\((\w+)\((.*?)\)\)', content, re.DOTALL)
     if m:
         raw_name = m.group(1)
         name = _normalize_tool_name(raw_name)

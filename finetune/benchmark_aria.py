@@ -321,9 +321,9 @@ def extract_tool_call(content: str) -> Optional[tuple]:
         except Exception:
             pass
 
-    # Format 7: Gemma 4 native tool_code — <eos>tool_code print(func(kwargs))<unused##>
+    # Format 7: Gemma 4 native tool_code — [<eos>]tool_code print(func(kwargs))
     m = re.search(
-        r'<eos>tool_code\s+print\((\w+)\((.*?)\)\)',
+        r'(?:<eos>)?tool_code\s+print\((\w+)\((.*?)\)\)',
         content, re.DOTALL
     )
     if m:
