@@ -29,6 +29,7 @@ from dash_chat import ChatComponent
 
 from config import ALERTS_CSV, SS_CSV, SAR_CSV, CLUSTER_LABELS_CSV, OLLAMA_MODEL, OLLAMA_BASE_URL
 from agents import OrchestratorAgent
+from agents.base_agent import stop_event as _agent_stop_event
 import lambda_ss_performance
 import lambda_rule_analysis
 import lambda_ofac
@@ -1066,11 +1067,22 @@ _chat_panel = html.Div([
         messages=[],
         class_name="AML AI",
         assistant_bubble_style={"maxWidth": "100%", "width": "100%"},
-    )
+    ),
+    html.Div([
+        dbc.Button(
+            "Stop",
+            id="stop-btn",
+            color="danger",
+            size="sm",
+            outline=True,
+            style={"position": "absolute", "bottom": "70px", "right": "24px", "zIndex": 999, "opacity": 0.7},
+        ),
+    ]),
 ], id="chat-scroll-container", style={
     "height": "calc(100vh - 80px)",
     "overflow": "auto",
     "overscrollBehaviorY": "contain",
+    "position": "relative",
 })
 
 _about_panel = dbc.Collapse(
@@ -1274,6 +1286,17 @@ def queue_prompt(n_clicks_list):
         return no_update
     # Attach timestamp so clicking the same prompt twice still fires
     return {"query": SUGGESTED_PROMPTS[idx], "ts": time.time()}
+
+
+@callback(
+    Output("stop-btn", "n_clicks"),
+    Input("stop-btn", "n_clicks"),
+    prevent_initial_call=True,
+)
+def handle_stop(n_clicks):
+    if n_clicks:
+        _agent_stop_event.set()
+    return 0
 
 
 @callback(

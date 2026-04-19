@@ -321,11 +321,11 @@ class BaseAgent:
                     if fig is not None:
                         chart_results.append((name, args, fig))
 
-                    # Always use user role for tool results — Gemma 4 responds to
-                    # <start_of_turn>tool with <eos> (trained on user-role tool results)
+                    # Use tool role — matches Gemma 4 training format <|turn>tool
                     messages.append({
-                        "role": "user",
-                        "content": f"Tool result for {name}:\n{result_text}",
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "content": result_text,
                     })
 
                 tool_call_count += 1
