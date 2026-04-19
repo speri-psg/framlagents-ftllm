@@ -13,10 +13,17 @@ Usage:
 """
 
 import argparse
+import io
 import json
 import re
 import sys
 import urllib.request
+
+# Force UTF-8 output on Windows so ✓/✗ don't crash cp1252
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+else:
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -313,6 +320,29 @@ def extract_tool_call(content: str) -> Optional[tuple]:
                 return obj["name"], obj.get("arguments", {})
         except Exception:
             pass
+
+    # Format 7: Gemma 4 native tool_code — <eos>tool_code print(func(kwargs))<unused##>
+    m = re.search(
+        r'<eos>tool_code\s+print\((\w+)\((.*?)\)\)',
+        content, re.DOTALL
+    )
+    if m:
+        func_name = m.group(1)
+        raw_kwargs = m.group(2)
+        args = {}
+        # Parse Python-style kwargs: key="value" or key=number or key=True/False
+        for km in re.finditer(r'(\w+)\s*=\s*(?:"([^"]*)"|([\d.]+)|(True|False))', raw_kwargs):
+            key = km.group(1)
+            val = km.group(2) or km.group(3) or km.group(4)
+            if km.group(3):
+                try:
+                    val = float(val) if '.' in val else int(val)
+                except ValueError:
+                    pass
+            elif km.group(4):
+                val = val == 'True'
+            args[key] = val
+        return func_name, args
 
     # Format 5: natural language thinking — "call/use/invoke `tool_name`"
     _SKIP_WORDS = {"the", "a", "an", "this", "that", "it", "my", "our"}

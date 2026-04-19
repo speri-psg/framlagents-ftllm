@@ -4,7 +4,11 @@ import json
 import re
 import sys
 import os
+import threading
 from openai import OpenAI
+
+# Global stop event — set this to interrupt any running agent loop
+stop_event = threading.Event()
 
 # Add project root to path so config is importable regardless of working dir
 _AGENTS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -148,6 +152,29 @@ def _parse_tool_call_from_content(content: str) -> tuple | None:
         except json.JSONDecodeError:
             pass
 
+    # Format 7: Gemma 4 native tool_code — <eos>tool_code print(func(kwargs))<unused##>
+    m = re.search(r'<eos>tool_code\s+print\((\w+)\((.*?)\)\)', content, re.DOTALL)
+    if m:
+        raw_name = m.group(1)
+        name = _normalize_tool_name(raw_name)
+        raw_kwargs = m.group(2)
+        args = {}
+        for km in re.finditer(r'(\w+)\s*=\s*(?:"([^"]*)"|([\d.]+)|(True|False))', raw_kwargs):
+            key = km.group(1)
+            if km.group(2) is not None:
+                val = km.group(2)
+            elif km.group(3) is not None:
+                raw_v = km.group(3)
+                try:
+                    val = float(raw_v) if '.' in raw_v else int(raw_v)
+                except ValueError:
+                    val = raw_v
+            else:
+                val = km.group(4) == 'True'
+            args[key] = val
+        print(f"[base_agent] fallback parse (Gemma4 tool_code format): {raw_name} → {name}, args={args}")
+        return name, _normalize_args(name, args)
+
     return None
 
 
@@ -188,6 +215,9 @@ class BaseAgent:
             create_kwargs["tool_choice"] = "auto"
 
         for iteration in range(MAX_TOOL_ITERATIONS):
+            if stop_event.is_set():
+                stop_event.clear()
+                return "Cancelled.", []
             response = self.client.chat.completions.create(**create_kwargs)
             msg = response.choices[0].message
 
