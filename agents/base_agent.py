@@ -322,10 +322,11 @@ class BaseAgent:
                         chart_results.append((name, args, fig))
 
                     # Use tool role — matches Gemma 4 training format <|turn>tool
+                    # Prefix matches training data: "Tool result for {name}:\n{content}"
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc_id,
-                        "content": result_text,
+                        "content": f"Tool result for {name}:\n{result_text}",
                     })
 
                 tool_call_count += 1

@@ -405,7 +405,9 @@ def compute_rule_sar_sweep(df, risk_factor_keyword, sweep_param=None, max_rows=M
             f"Call list_rules to see available rules. Known: {known}"
         )
 
-    # Resolve sweep parameter
+    # Resolve sweep parameter — normalize spaces/hyphens to underscores
+    if sweep_param is not None:
+        sweep_param = sweep_param.replace(" ", "_").replace("-", "_")
     if sweep_param is None or sweep_param not in entry["sweep_params"]:
         sweep_param = entry["default_sweep"]
     sp = entry["sweep_params"][sweep_param]
@@ -674,6 +676,12 @@ def compute_rule_2d_sweep(df, risk_factor_keyword, param1=None, param2=None):
         param1 = default_2d[0]
     if param2 is None:
         param2 = default_2d[1]
+
+    # Normalize param names: model may use spaces instead of underscores
+    if param1 is not None:
+        param1 = param1.replace(" ", "_").replace("-", "_")
+    if param2 is not None:
+        param2 = param2.replace(" ", "_").replace("-", "_")
 
     if param1 not in params:
         return f"Unknown sweep_param_1 '{param1}'. Valid: {keys}", None
