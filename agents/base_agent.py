@@ -175,6 +175,45 @@ def _parse_tool_call_from_content(content: str) -> tuple | None:
         print(f"[base_agent] fallback parse (Gemma4 tool_code format): {raw_name} → {name}, args={args}")
         return name, _normalize_args(name, args)
 
+    # Format 8: backtick-wrapped function call — `func_name(kwargs)`
+    _known_tools = {"threshold_tuning", "rule_sar_backtest", "rule_2d_sweep",
+                    "list_rules", "search_policy_kb", "cluster_analysis"}
+    m = re.search(r'`(\w+)\(([^`]{0,400})\)`', content, re.DOTALL)
+    if m and m.group(1) in _known_tools:
+        raw_name = m.group(1)
+        name = _normalize_tool_name(raw_name)
+        raw_kwargs = m.group(2)
+        args = {}
+        for km in re.finditer(r"(\w+)\s*=\s*(?:'([^']*)'|\"([^\"]*)\"|(\d+(?:\.\d+)?))", raw_kwargs):
+            key = km.group(1)
+            val = km.group(2) or km.group(3) or km.group(4)
+            if km.group(4):
+                try:
+                    val = float(val) if '.' in val else int(val)
+                except ValueError:
+                    pass
+            args[key] = val
+        print(f"[base_agent] fallback parse (backtick format): {raw_name} → {name}, args={args}")
+        return name, _normalize_args(name, args)
+
+    # Format 5: natural language — "call [the] `tool_name`"
+    _skip = {"the", "a", "an", "this", "that", "it", "my", "our"}
+    for m in re.finditer(
+        r'(?:call|use|invoke|using)\s+(?:(?:the|a|an)\s+)?[`"]?(\w+)[`"]?',
+        content, re.IGNORECASE
+    ):
+        raw_name = m.group(1)
+        if raw_name.lower() in _skip:
+            continue
+        name = _normalize_tool_name(raw_name)
+        args = {}
+        for km in re.finditer(r'[`"]?(\w+)[`"]?\s*[=:]\s*[`\'"]([^`\'"]+)[`\'"]', content):
+            k, v = km.group(1), km.group(2)
+            if k.lower() not in {"call", "name"} | _skip:
+                args[k] = v
+        print(f"[base_agent] fallback parse (NL format): {raw_name} → {name}, args={args}")
+        return name, _normalize_args(name, args)
+
     return None
 
 

@@ -344,9 +344,33 @@ def extract_tool_call(content: str) -> Optional[tuple]:
             args[key] = val
         return func_name, args
 
-    # Format 5: natural language thinking — "call/use/invoke `tool_name`"
+    # Format 8: backtick-wrapped function call — `func_name(kwargs)`
+    m = re.search(r'`(\w+)\(([^`]{0,400})\)`', content, re.DOTALL)
+    if m:
+        func_name = m.group(1)
+        raw_kwargs = m.group(2)
+        # Only treat as tool call if func_name looks like a known tool
+        _known = {"threshold_tuning", "rule_sar_backtest", "rule_2d_sweep",
+                  "list_rules", "search_policy_kb", "cluster_analysis"}
+        if func_name in _known:
+            args = {}
+            for km in re.finditer(r"(\w+)\s*=\s*(?:'([^']*)'|\"([^\"]*)\"|(\d+(?:\.\d+)?))", raw_kwargs):
+                key = km.group(1)
+                val = km.group(2) or km.group(3) or km.group(4)
+                if km.group(4):
+                    try:
+                        val = float(val) if '.' in val else int(val)
+                    except ValueError:
+                        pass
+                args[key] = val
+            return func_name, args
+
+    # Format 5: natural language thinking — "call/use/invoke [the] `tool_name`"
     _SKIP_WORDS = {"the", "a", "an", "this", "that", "it", "my", "our"}
-    for m in re.finditer(r'(?:call|use|invoke|using)\s+[`"]?(\w+)[`"]?', content, re.IGNORECASE):
+    for m in re.finditer(
+        r'(?:call|use|invoke|using)\s+(?:(?:the|a|an)\s+)?[`"]?(\w+)[`"]?',
+        content, re.IGNORECASE
+    ):
         tool_name = m.group(1)
         if tool_name.lower() in _SKIP_WORDS:
             continue
@@ -449,7 +473,7 @@ def run_benchmark(base_url: str, model: str, verbose: bool):
         print(f"  Args  {arg_st} {args_detail}")
 
         if verbose:
-            print(f"  Response (first 800): {content[:800].replace(chr(10),' ')}")
+            print(f"  Response (first 1500): {content[:1500].replace(chr(10),' ')}")
 
         if case.human_eval:
             print(f"  ── Policy response (score 1=wrong 2=shallow 3=correct+cited) ──")
