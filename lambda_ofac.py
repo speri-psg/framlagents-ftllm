@@ -36,7 +36,7 @@ PROGRAM_LABEL = {
 
 
 def _load_customers() -> pd.DataFrame:
-    df = pd.read_csv(CUSTOMERS_CSV)
+    df = pd.read_csv(CUSTOMERS_CSV, low_memory=False)
     df.columns = [c.strip().lower() for c in df.columns]
     return df
 

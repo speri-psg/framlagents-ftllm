@@ -181,6 +181,8 @@ class OrchestratorAgent:
             "which customers", "how many customers", "list customers",
             "customers have ofac", "customers with ofac", "customers on the",
             "portfolio have", "how many have",
+            "are there any customers", "customers flagged", "flagged for sanctions",
+            "any customers", "show me customers",
         ])
         is_ofac = any(w in q_lower for w in [
             "ofac", "sdn", "sanctions", "sanctioned", "sanction list",
