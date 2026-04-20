@@ -17,8 +17,10 @@ Targets — exact benchmark query failures from V25 + <eos>-stop run:
   G9:  threshold_column TRXN_AMT_MONTHLY empty for Business (T01 exact query)
   G10: Velocity Single SAR backtest variation ("SAR catch rate for Velocity Single")
   G11: Activity Deviation Check SAR backtest (additional ACH/Check coverage)
+  G12: "weekly transaction amount" -> AVG_TRXN_AMT (not AVG_TRXNS_WEEK)
+  G13: "weekly transaction count" -> AVG_TRXNS_WEEK (reinforce count vs amount distinction)
 
-Combined: V25 (692) + 11 V26 = 703 total -> framl_train_combined_v26.jsonl
+Combined: V25 (692) + 13 V26 = 705 total -> framl_train_combined_v26.jsonl
 """
 
 import json, pathlib
@@ -514,6 +516,110 @@ examples.append({"messages": [
         "At highest value (200000): TP=11, FP=34, FN=30, TN=237 (TP rate=26.8%, precision=24.4%).\n\n"
         "The Check rule already operates above 90% SAR catch rate at the current $50K floor — "
         "raising to $60K saves 17 false positives (205 to 188) with minimal SAR loss."
+    )},
+]})
+
+PC_THRESHOLD_BIZ_AVG_AMT = """\
+Tool result for threshold_tuning:
+=== PRE-COMPUTED THRESHOLD ANALYSIS (copy this verbatim, do not alter numbers) ===
+Segment: Business | Column: AVG_TRXN_AMT | Labeled: 3,247 customers (SAR=412, non-SAR=2,835)
+
+Threshold    TP    FP    FN    TN    TP-rate  Precision
+     1,000   412  2,835     0     0   100.0%      12.7%
+     5,000   388  2,210    24   625    94.2%      14.9%
+    10,000   351  1,604    61  1,231   85.2%      17.9%
+    20,000   284    912   128  1,923   68.9%      23.7%
+    35,000   198    412   214  2,423   48.1%      32.5%
+    50,000   132    188   280  2,647   32.0%      41.3%
+    75,000    74     62   338  2,773   18.0%      54.4%
+
+At current threshold (10,000): TP=351, FP=1,604, FN=61, TN=1,231 (TP rate=85.2%, precision=17.9%).
+Crossover point (precision=TP rate): ~$38,000 (TP rate=45.1%, precision=45.1%).
+(FP/FN trade-off chart shown below.)
+=== END PRE-COMPUTED THRESHOLD ANALYSIS ==="""
+
+PC_THRESHOLD_BIZ_AVG_WEEK = """\
+Tool result for threshold_tuning:
+=== PRE-COMPUTED THRESHOLD ANALYSIS (copy this verbatim, do not alter numbers) ===
+Segment: Business | Column: AVG_TRXNS_WEEK | Labeled: 3,247 customers (SAR=412, non-SAR=2,835)
+
+Threshold    TP    FP    FN    TN    TP-rate  Precision
+         1   412  2,835     0     0   100.0%      12.7%
+         3   374  1,842    38   993    90.8%      16.9%
+         5   318  1,124    94  1,711   77.2%      22.0%
+        10   228    502   184  2,333   55.3%      31.2%
+        15   148    212   264  2,623   35.9%      41.1%
+        20    84     72   328  2,763   20.4%      53.8%
+        25    42     18   370  2,817   10.2%      70.0%
+
+At current threshold (5): TP=318, FP=1,124, FN=94, TN=1,711 (TP rate=77.2%, precision=22.0%).
+Crossover point (precision=TP rate): ~13 transactions/week (TP rate=39.1%, precision=39.1%).
+(FP/FN trade-off chart shown below.)
+=== END PRE-COMPUTED THRESHOLD ANALYSIS ==="""
+
+# ── G12: "weekly transaction amount" -> AVG_TRXN_AMT ─────────────────────────
+examples.append({"messages": [
+    {"role": "system", "content": THRESHOLD_SYSTEM},
+    {"role": "user", "content": (
+        "Show FP/FN tuning for Business customers by weekly transaction amount"
+    )},
+    {"role": "assistant", "content": None, "tool_calls": [
+        tc("g12", "threshold_tuning", {
+            "segment": "Business",
+            "threshold_column": "AVG_TRXN_AMT",
+        })
+    ]},
+    {"role": "tool", "tool_call_id": "g12", "content": PC_THRESHOLD_BIZ_AVG_AMT},
+    {"role": "assistant", "content": (
+        "=== PRE-COMPUTED THRESHOLD ANALYSIS (copy this verbatim, do not alter numbers) ===\n"
+        "Segment: Business | Column: AVG_TRXN_AMT\n"
+        "Labeled: 3,247 customers (SAR=412, non-SAR=2,835)\n\n"
+        "Threshold  |  TP  |   FP  |  FN  |   TN  | TP-rate | Precision\n"
+        "  $1,000   | 412  | 2,835 |   0  |    0  | 100.0%  |  12.7%\n"
+        "  $5,000   | 388  | 2,210 |  24  |  625  |  94.2%  |  14.9%\n"
+        " $10,000   | 351  | 1,604 |  61  | 1,231 |  85.2%  |  17.9%\n"
+        " $20,000   | 284  |   912 | 128  | 1,923 |  68.9%  |  23.7%\n"
+        " $35,000   | 198  |   412 | 214  | 2,423 |  48.1%  |  32.5%\n"
+        " $50,000   | 132  |   188 | 280  | 2,647 |  32.0%  |  41.3%\n"
+        " $75,000   |  74  |    62 | 338  | 2,773 |  18.0%  |  54.4%\n\n"
+        "At current threshold ($10K): TP=351, FP=1,604, FN=61, TN=1,231 "
+        "(TP rate=85.2%, precision=17.9%).\n"
+        "Crossover point: ~$38,000 (TP rate=45.1%, precision=45.1%).\n\n"
+        "Raising the average transaction amount threshold to $20K cuts false positives by 43% "
+        "(1,604 to 912) while retaining 68.9% of the 412 SAR customers."
+    )},
+]})
+
+# ── G13: "weekly transaction count" -> AVG_TRXNS_WEEK (reinforce distinction) ─
+examples.append({"messages": [
+    {"role": "system", "content": THRESHOLD_SYSTEM},
+    {"role": "user", "content": (
+        "Show FP/FN tuning for Business customers by weekly transaction count"
+    )},
+    {"role": "assistant", "content": None, "tool_calls": [
+        tc("g13", "threshold_tuning", {
+            "segment": "Business",
+            "threshold_column": "AVG_TRXNS_WEEK",
+        })
+    ]},
+    {"role": "tool", "tool_call_id": "g13", "content": PC_THRESHOLD_BIZ_AVG_WEEK},
+    {"role": "assistant", "content": (
+        "=== PRE-COMPUTED THRESHOLD ANALYSIS (copy this verbatim, do not alter numbers) ===\n"
+        "Segment: Business | Column: AVG_TRXNS_WEEK\n"
+        "Labeled: 3,247 customers (SAR=412, non-SAR=2,835)\n\n"
+        "Threshold  |  TP  |   FP  |  FN  |   TN  | TP-rate | Precision\n"
+        "     1     | 412  | 2,835 |   0  |    0  | 100.0%  |  12.7%\n"
+        "     3     | 374  | 1,842 |  38  |  993  |  90.8%  |  16.9%\n"
+        "     5     | 318  | 1,124 |  94  | 1,711 |  77.2%  |  22.0%\n"
+        "    10     | 228  |   502 | 184  | 2,333 |  55.3%  |  31.2%\n"
+        "    15     | 148  |   212 | 264  | 2,623 |  35.9%  |  41.1%\n"
+        "    20     |  84  |    72 | 328  | 2,763 |  20.4%  |  53.8%\n"
+        "    25     |  42  |    18 | 370  | 2,817 |  10.2%  |  70.0%\n\n"
+        "At current threshold (5 txns/week): TP=318, FP=1,124, FN=94, TN=1,711 "
+        "(TP rate=77.2%, precision=22.0%).\n"
+        "Crossover point: ~13 transactions/week (TP rate=39.1%, precision=39.1%).\n\n"
+        "Raising the weekly transaction count threshold to 10 cuts false positives by 55% "
+        "(1,124 to 502) while retaining 55.3% of the 412 SAR customers."
     )},
 ]})
 
