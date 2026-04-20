@@ -8,8 +8,8 @@ Scoring dimensions:
   4. Policy citation quality — human eval, scored 1-3 (prompted, not automated)
 
 Usage:
-  python benchmark_aria.py --base-url http://localhost:11434/v1 --model aria-v1
-  python benchmark_aria.py --base-url https://<tunnel>.trycloudflare.com/v1 --model aria-v1
+  python benchmark_aria.py --base-url http://localhost:11434/v1 --model aria-v2
+  python benchmark_aria.py --base-url https://<tunnel>.trycloudflare.com/v1 --model aria-v2
 """
 
 import argparse
@@ -32,7 +32,7 @@ from typing import Optional
 # ---------------------------------------------------------------------------
 
 DEFAULT_BASE_URL = "http://localhost:11434/v1"
-DEFAULT_MODEL    = "aria-v1"
+DEFAULT_MODEL    = "aria-v2"
 TIMEOUT          = 180
 
 SYSTEM_RULE = (

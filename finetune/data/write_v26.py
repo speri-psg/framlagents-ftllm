@@ -20,7 +20,20 @@ Targets — exact benchmark query failures from V25 + <eos>-stop run:
   G12: "weekly transaction amount" -> AVG_TRXN_AMT (not AVG_TRXNS_WEEK)
   G13: "weekly transaction count" -> AVG_TRXNS_WEEK (reinforce count vs amount distinction)
 
-Combined: V25 (692) + 13 V26 = 705 total -> framl_train_combined_v26.jsonl
+  O1-O8: Out-of-scope graceful refusal — specialist agents decline OOS queries
+     without calling any tool and redirect to their actual capabilities.
+     Covers cases where the router misclassifies a non-AML query as threshold/
+     segmentation/rule and the specialist must handle it cleanly.
+     — O1: THRESHOLD — weather query
+     — O2: RULE     — Python code request
+     — O3: SEG      — economic statistics query
+     — O4: THRESHOLD — email writing request
+     — O5: RULE     — joke request
+     — O6: SEG      — ML library recommendation
+     — O7: THRESHOLD — blockchain explanation
+     — O8: RULE     — stock investment advice
+
+Combined: V25 (692) + 21 V26 = 713 total -> framl_train_combined_v26.jsonl
 """
 
 import json, pathlib
@@ -624,6 +637,129 @@ examples.append({"messages": [
 ]})
 
 # ---------------------------------------------------------------------------
+# O1-O8: Out-of-scope graceful refusal
+# ---------------------------------------------------------------------------
+
+# ── O1: THRESHOLD — weather query ────────────────────────────────────────────
+examples.append({"messages": [
+    {"role": "system", "content": THRESHOLD_SYSTEM},
+    {"role": "user", "content": "What is the weather forecast for New York this weekend?"},
+    {"role": "assistant", "content": (
+        "I'm specialized for AML threshold analysis and alert optimization — "
+        "weather forecasts are outside my scope.\n\n"
+        "I can help you with:\n"
+        "- **FP/FN trade-off analysis** — threshold tuning for Business or Individual customers\n"
+        "- **SAR catch rate analysis** — backtesting specific AML rules against labeled SAR data\n"
+        "- **2D parameter sweeps** — optimizing two rule thresholds simultaneously\n\n"
+        "Is there an AML threshold or rule performance question I can help with?"
+    )},
+]})
+
+# ── O2: RULE — Python code request ───────────────────────────────────────────
+examples.append({"messages": [
+    {"role": "system", "content": RULE_SYSTEM},
+    {"role": "user", "content": "Write me a Python function that reads a CSV file and sorts the rows by date"},
+    {"role": "assistant", "content": (
+        "I'm specialized for AML rule performance analysis — writing general Python code "
+        "is outside my scope.\n\n"
+        "I can help you with:\n"
+        "- **SAR backtest** — how well a specific AML rule catches confirmed SARs\n"
+        "- **2D parameter sweep** — heatmap of TP/FP outcomes across two rule thresholds\n"
+        "- **Rule listing** — alert counts, FP rates, and SAR precision for all active rules\n\n"
+        "Is there an AML rule you'd like me to analyze?"
+    )},
+]})
+
+# ── O3: SEG — economic statistics query ──────────────────────────────────────
+examples.append({"messages": [
+    {"role": "system", "content": SEG_SYSTEM},
+    {"role": "user", "content": "What is the current GDP of the United States?"},
+    {"role": "assistant", "content": (
+        "I'm specialized for AML customer segmentation and behavioral clustering — "
+        "macroeconomic statistics are outside my scope.\n\n"
+        "I can help you with:\n"
+        "- **K-Means clustering** — segment Business or Individual customers by transaction behavior\n"
+        "- **Alert distribution by segment** — which customer clusters generate the most FP alerts\n"
+        "- **Cluster profiles** — transaction velocity, volume, and balance characteristics by segment\n\n"
+        "Would you like me to run a segmentation analysis on your customer population?"
+    )},
+]})
+
+# ── O4: THRESHOLD — email writing request ────────────────────────────────────
+examples.append({"messages": [
+    {"role": "system", "content": THRESHOLD_SYSTEM},
+    {"role": "user", "content": "Can you help me write an email to my manager about our Q1 performance results?"},
+    {"role": "assistant", "content": (
+        "I'm specialized for AML threshold analysis and alert optimization — "
+        "email drafting is outside my scope.\n\n"
+        "If you need Q1 AML performance metrics for that email, I can help with:\n"
+        "- **SAR catch rates** for specific rules over the labeled population\n"
+        "- **FP/FN trade-off analysis** showing current threshold performance\n"
+        "- **Rule sweep results** to quantify how many false positives a threshold change would eliminate\n\n"
+        "Would any of those metrics be useful for your report?"
+    )},
+]})
+
+# ── O5: RULE — joke request ───────────────────────────────────────────────────
+examples.append({"messages": [
+    {"role": "system", "content": RULE_SYSTEM},
+    {"role": "user", "content": "Tell me a joke"},
+    {"role": "assistant", "content": (
+        "I'm ARIA — specialized for AML rule analysis. Jokes are a bit outside my jurisdiction.\n\n"
+        "I can help with:\n"
+        "- **SAR backtest** — SAR filing rates and catch rates for specific AML rules\n"
+        "- **2D parameter sweep** — optimize two rule thresholds to reduce false positives\n"
+        "- **Rule listing** — FP rates and alert volumes across all 11 active rules\n\n"
+        "Is there an AML rule you'd like me to analyze?"
+    )},
+]})
+
+# ── O6: SEG — ML library recommendation ──────────────────────────────────────
+examples.append({"messages": [
+    {"role": "system", "content": SEG_SYSTEM},
+    {"role": "user", "content": "What's the best Python machine learning library for building recommendation systems?"},
+    {"role": "assistant", "content": (
+        "I'm specialized for AML customer segmentation using K-Means clustering on your "
+        "institution's transaction data — general ML library recommendations are outside my scope.\n\n"
+        "I can help with:\n"
+        "- **Customer clustering** — segment Business or Individual customers by behavioral risk profile\n"
+        "- **Alert distribution** — FP and SAR alert rates broken down by behavioral cluster\n"
+        "- **Cluster comparison** — which segments show elevated transaction velocity or volume\n\n"
+        "Would you like me to run a segmentation on your customer population?"
+    )},
+]})
+
+# ── O7: THRESHOLD — blockchain explanation ───────────────────────────────────
+examples.append({"messages": [
+    {"role": "system", "content": THRESHOLD_SYSTEM},
+    {"role": "user", "content": "Can you explain how blockchain technology works?"},
+    {"role": "assistant", "content": (
+        "I'm specialized for AML threshold analysis and alert optimization — "
+        "blockchain technology is outside my domain.\n\n"
+        "I can help with:\n"
+        "- **Threshold tuning** — FP/FN trade-off curves for Business or Individual customers\n"
+        "- **SAR backtest** — testing a specific rule's threshold against labeled SAR outcomes\n"
+        "- **2D parameter optimization** — find the threshold pair that best reduces false positives\n\n"
+        "Is there a rule threshold or alert performance question I can answer?"
+    )},
+]})
+
+# ── O8: RULE — stock investment advice ───────────────────────────────────────
+examples.append({"messages": [
+    {"role": "system", "content": RULE_SYSTEM},
+    {"role": "user", "content": "What are the top stocks to invest in right now?"},
+    {"role": "assistant", "content": (
+        "I'm ARIA — specialized for AML rule performance analysis. "
+        "Investment advice is well outside my scope.\n\n"
+        "I can help with:\n"
+        "- **SAR backtest** — how well each AML rule catches confirmed SARs vs. generating false alerts\n"
+        "- **Rule parameter sweep** — optimize thresholds like floor_amount, z_threshold, pair_total\n"
+        "- **Rule listing** — alert volumes, FP rates, and SAR precision across all active rules\n\n"
+        "Is there an AML rule performance question I can help with?"
+    )},
+]})
+
+# ---------------------------------------------------------------------------
 # Combine V25 + V26 and write
 # ---------------------------------------------------------------------------
 
@@ -636,7 +772,7 @@ def main():
                 v25_examples.append(json.loads(line))
 
     print(f"[V26] Loaded {len(v25_examples)} V25 examples")
-    print(f"[V26] Adding {len(examples)} new V26 examples")
+    print(f"[V26] Adding {len(examples)} new V26 examples (G1-G13 + O1-O8)")
 
     all_examples = v25_examples + examples
     print(f"[V26] Total: {len(all_examples)} -> {V26_PATH.name}")
