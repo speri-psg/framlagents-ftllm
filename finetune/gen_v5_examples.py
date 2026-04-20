@@ -3,7 +3,7 @@ Generate V5 training examples (ex51–ex80) — volume reinforcement for persist
 
 Focus:
   - threshold_tuning / sar_backtest: verbatim copy + EXACTLY ONE sentence. Stop.
-  - ss_cluster_analysis: 3-5 sentences only, numbers from tool result only, no invented thresholds.
+  - ds_cluster_analysis: 3-5 sentences only, numbers from tool result only, no invented thresholds.
   - alerts_distribution / segment_stats: correct interpretation, no invented thresholds.
 """
 
@@ -52,7 +52,7 @@ SYS_SEGMENTATION = (
     "Do NOT use any Chinese or other non-English characters.\n\n"
     "RULES — follow these exactly:\n"
     "1. ALWAYS call a tool. Never answer segmentation or cluster questions from memory.\n"
-    "2. For clustering with rich demographics (preferred) — call ss_cluster_analysis.\n"
+    "2. For clustering with rich demographics (preferred) — call ds_cluster_analysis.\n"
     "3. For alert/FP distribution by segment — call alerts_distribution.\n"
     "4. For the legacy alerts dataset — call cluster_analysis only if the user explicitly asks.\n"
     "5. Do NOT call multiple segmentation tools for the same request — pick exactly one.\n"
@@ -511,12 +511,12 @@ examples = [
         asst(SAR_IND_AVG_TRXN_AMT + "\n\nMaintaining the threshold at or below 485.0 preserves full SAR detection; once past 93,758.0, 127 SARs are missed simultaneously — a sharp single-step exposure."),
     ]),
 
-    # ── ss_cluster_analysis: 3-5 sentences, correct numbers, no invented thresholds ──
+    # ── ds_cluster_analysis: 3-5 sentences, correct numbers, no invented thresholds ──
 
     # ex67 — Business 4 clusters, all clusters described, Cluster 4 highest risk
     ex(SYS_SEGMENTATION, [
         user("Cluster Business accounts into 4 groups."),
-        tc("t67", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4}),
+        tc("t67", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4}),
         tr("t67", BIZ_4CLUSTER),
         asst(
             "K-Means clustering on **Business** customers with **4** clusters covers 14,423 active accounts (PC1=38.2%, PC2=18.1%). "
@@ -530,7 +530,7 @@ examples = [
     # ex68 — Business 4 clusters, user asks highest risk only
     ex(SYS_SEGMENTATION, [
         user("Cluster business into 4 segments and show the highest risk segment."),
-        tc("t68", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4}),
+        tc("t68", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4}),
         tr("t68", BIZ_4CLUSTER),
         asst(
             "K-Means clustering on **Business** customers with **4** clusters covers 14,423 active accounts. "
@@ -544,7 +544,7 @@ examples = [
     # ex69 — Business 6 clusters, Cluster 4 highest risk
     ex(SYS_SEGMENTATION, [
         user("Give me 6 Business segments and tell me which has the highest risk."),
-        tc("t69", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 6}),
+        tc("t69", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 6}),
         tr("t69", BIZ_6CLUSTER),
         asst(
             "K-Means clustering on **Business** customers with **6** clusters covers 14,423 active accounts (PC1=38.2%, PC2=18.1%). "
@@ -559,7 +559,7 @@ examples = [
     # ex70 — Individual 4 clusters, Cluster 4 highest risk
     ex(SYS_SEGMENTATION, [
         user("Cluster Individual customers into 4 groups and identify the highest risk."),
-        tc("t70", "ss_cluster_analysis", {"customer_type": "Individual", "n_clusters": 4}),
+        tc("t70", "ds_cluster_analysis", {"customer_type": "Individual", "n_clusters": 4}),
         tr("t70", IND_4CLUSTER),
         asst(
             "K-Means clustering on **Individual** customers with **4** clusters covers 38,104 active accounts (PC1=29.4%, PC2=14.7%). "
@@ -574,7 +574,7 @@ examples = [
     # ex71 — Individual 5 clusters, Cluster 5 highest risk
     ex(SYS_SEGMENTATION, [
         user("Break individual customers into 5 segments."),
-        tc("t71", "ss_cluster_analysis", {"customer_type": "Individual", "n_clusters": 5}),
+        tc("t71", "ds_cluster_analysis", {"customer_type": "Individual", "n_clusters": 5}),
         tr("t71", IND_5CLUSTER),
         asst(
             "K-Means clustering on **Individual** customers with **5** clusters covers 38,104 active accounts (PC1=29.4%, PC2=14.7%). "
@@ -588,7 +588,7 @@ examples = [
     # ex72 — All customers 4 clusters, Cluster 1 highest risk (highest avg_weekly_trxn_amt)
     ex(SYS_SEGMENTATION, [
         user("Cluster all customers into 4 groups."),
-        tc("t72", "ss_cluster_analysis", {"customer_type": "All", "n_clusters": 4}),
+        tc("t72", "ds_cluster_analysis", {"customer_type": "All", "n_clusters": 4}),
         tr("t72", ALL_4CLUSTER),
         asst(
             "K-Means clustering on **All** customers with **4** clusters covers 52,527 active accounts (PC1=32.5%, PC2=15.8%). "
@@ -602,7 +602,7 @@ examples = [
     # ex73 — Individual 3 clusters, Cluster 3 highest risk
     ex(SYS_SEGMENTATION, [
         user("Give me 3 Individual clusters and show the highest risk one."),
-        tc("t73", "ss_cluster_analysis", {"customer_type": "Individual", "n_clusters": 3}),
+        tc("t73", "ds_cluster_analysis", {"customer_type": "Individual", "n_clusters": 3}),
         tr("t73", IND_3CLUSTER),
         asst(
             "K-Means clustering on **Individual** customers with **3** clusters covers 38,104 active accounts. "
@@ -616,7 +616,7 @@ examples = [
     # ex74 — user asks for threshold recommendations — model declines to invent
     ex(SYS_SEGMENTATION, [
         user("Cluster Business into 4 groups and suggest specific dollar thresholds for each cluster."),
-        tc("t74", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4}),
+        tc("t74", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4}),
         tr("t74", BIZ_4CLUSTER),
         asst(
             "K-Means clustering on **Business** customers with **4** clusters covers 14,423 active accounts (PC1=38.2%, PC2=18.1%). "
@@ -629,7 +629,7 @@ examples = [
     # ex75 — All clusters, user asks for risk analysis and threshold recommendations — model declines
     ex(SYS_SEGMENTATION, [
         user("Cluster all customers into 4 segments and recommend threshold adjustments."),
-        tc("t75", "ss_cluster_analysis", {"customer_type": "All", "n_clusters": 4}),
+        tc("t75", "ds_cluster_analysis", {"customer_type": "All", "n_clusters": 4}),
         tr("t75", ALL_4CLUSTER),
         asst(
             "K-Means clustering on **All** customers with **4** clusters covers 52,527 active accounts (PC1=32.5%, PC2=15.8%). "
@@ -642,7 +642,7 @@ examples = [
     # ex76 — Individual 5 clusters, user asks for threshold recommendations — model declines
     ex(SYS_SEGMENTATION, [
         user("Show me the 5 Individual segments and tell me what thresholds I should set for each."),
-        tc("t76", "ss_cluster_analysis", {"customer_type": "Individual", "n_clusters": 5}),
+        tc("t76", "ds_cluster_analysis", {"customer_type": "Individual", "n_clusters": 5}),
         tr("t76", IND_5CLUSTER),
         asst(
             "K-Means clustering on **Individual** customers with **5** clusters covers 38,104 active accounts (PC1=29.4%, PC2=14.7%). "

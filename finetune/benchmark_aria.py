@@ -150,7 +150,7 @@ CASES = [
 
     # Segmentation
     Case("S01", "Cluster Business customers by transaction behavior",
-         SYSTEM_SEG, None,   # accepts cluster_analysis or ss_cluster_analysis
+         SYSTEM_SEG, None,   # accepts cluster_analysis or ds_cluster_analysis
          note="tool must contain 'cluster'"),
 
     Case("S02", "Which Business cluster has the highest transaction volume?",

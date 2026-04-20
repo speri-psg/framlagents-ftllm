@@ -316,7 +316,7 @@ for ax in [2.05, 6.67, 11.08]:                                 # drops to each a
 # ── Agent cards ──
 agents_info = [
     (0.3,  "Threshold Agent",    "threshold_tuning\nsar_backtest\nsegment_stats"),
-    (4.92, "Segmentation Agent", "ss_cluster_analysis\nalerts_distribution"),
+    (4.92, "Segmentation Agent", "ds_cluster_analysis\nalerts_distribution"),
     (9.33, "Policy Agent",       "ChromaDB RAG\n11 AML docs  ·  241 chunks"),
 ]
 for ax, name, tools_text in agents_info:
@@ -371,7 +371,7 @@ layers = [
     ("User Interface", "Dash web app\nChat interface\nSide-panel quick prompts", 0.4),
     ("Orchestrator", "Intent routing\nQuery classification\nMulti-agent coordination", 4.7),
     ("Agents + Tools", "Threshold Agent  →  threshold_tuning / sar_backtest\n"
-                       "Segmentation Agent  →  ss_cluster_analysis / alerts_distribution\n"
+                       "Segmentation Agent  →  ds_cluster_analysis / alerts_distribution\n"
                        "Policy Agent  →  ChromaDB RAG retrieval", 9.0),
 ]
 for label, desc, left in layers:
@@ -416,7 +416,7 @@ agent_data = [
       "Covers Business and Individual segments across 3 threshold columns"]),
     ("Segmentation Agent",
      ["K-Means clustering of customer behavioural profiles",
-      "Tools: ss_cluster_analysis, alerts_distribution",
+      "Tools: ds_cluster_analysis, alerts_distribution",
       "Identifies high-risk clusters by transaction frequency and volume",
       "Renders treemap and scatter visualisations"]),
     ("Policy Agent",

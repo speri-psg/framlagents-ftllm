@@ -37,10 +37,13 @@ _TOOL_NAME_ALIASES = {
     "fp_fn_tuning":         "threshold_tuning",
     "analyze_threshold":    "threshold_tuning",
     "alert_analysis":       "threshold_tuning",
-    # Qwen / other model variants
-    "cluster_analysis":     "segmentation",
-    "segment_analysis":     "segmentation",
-    "segmentation_analysis":"segmentation",
+    # Segmentation tool aliases — V26 model trained on ss_cluster_analysis, bridge to ds_cluster_analysis
+    "ss_cluster_analysis":  "ds_cluster_analysis",
+    "cluster_analysis":     "ds_cluster_analysis",
+    "segment_analysis":     "ds_cluster_analysis",
+    "segmentation_analysis":"ds_cluster_analysis",
+    "segment_customers":    "ds_cluster_analysis",
+    "segmentation_kmeans":  "ds_cluster_analysis",
     "sanctions_screening":  "ofac_screening",
     "ofac_check":           "ofac_screening",
     "sdn_screening":        "ofac_screening",
@@ -177,7 +180,7 @@ def _parse_tool_call_from_content(content: str) -> tuple | None:
 
     # Format 8: backtick-wrapped function call — `func_name(kwargs)`
     _known_tools = {"threshold_tuning", "rule_sar_backtest", "rule_2d_sweep",
-                    "list_rules", "search_policy_kb", "cluster_analysis"}
+                    "list_rules", "search_policy_kb", "ds_cluster_analysis"}
     m = re.search(r'`(\w+)\(([^`]{0,400})\)`', content, re.DOTALL)
     if m and m.group(1) in _known_tools:
         raw_name = m.group(1)

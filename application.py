@@ -30,7 +30,7 @@ from dash_chat import ChatComponent
 from config import ALERTS_CSV, SS_CSV, SAR_CSV, CLUSTER_LABELS_CSV, OLLAMA_MODEL, OLLAMA_BASE_URL
 from agents import OrchestratorAgent
 from agents.base_agent import stop_event as _agent_stop_event
-import lambda_ss_performance
+import lambda_ds_performance
 import lambda_rule_analysis
 import lambda_ofac
 import make_figures
@@ -51,10 +51,10 @@ _df_raw = _df_raw.rename(columns={
 _df_raw["alerts"]          = _df_raw["alerts"].map({"Yes": 1, "No": 0})
 _df_raw["false_positives"] = _df_raw["false_positives"].map({"Yes": 1, "No": 0})
 _df_raw["false_negatives"] = _df_raw["false_negatives"].map({"Yes": 1, "No": 0})
-_df_raw["smart_segment_id"]= _df_raw["customer_type"].map({"BUSINESS": 0, "INDIVIDUAL": 1})
+_df_raw["dynamic_segment"]= _df_raw["customer_type"].map({"BUSINESS": 0, "INDIVIDUAL": 1})
 DF           = _df_raw
-DF_BUSINESS  = DF[DF["smart_segment_id"] == 0]
-DF_INDIVIDUAL= DF[DF["smart_segment_id"] == 1]
+DF_BUSINESS  = DF[DF["dynamic_segment"] == 0]
+DF_INDIVIDUAL= DF[DF["dynamic_segment"] == 1]
 
 DF_SS  = pd.read_csv(SS_CSV) if os.path.exists(SS_CSV) else None
 DF_SAR = pd.read_csv(SAR_CSV) if os.path.exists(SAR_CSV) else None
@@ -64,8 +64,8 @@ DF_TXN   = pd.read_csv(_TXN_CSV, parse_dates=["txn_date"]) if os.path.exists(_TX
 _NET_CSV = os.path.join(_HERE, "docs", "network_features.csv")
 DF_NET   = pd.read_csv(_NET_CSV).set_index("customer_id") if os.path.exists(_NET_CSV) else None
 print(f"Transaction data: {'loaded (' + str(len(DF_TXN)) + ' rows)' if DF_TXN is not None else 'not found — run generate_aml_transactions.py'}")
-DF_SAR_BUSINESS    = DF_SAR[DF_SAR["smart_segment_id"] == 0] if DF_SAR is not None else None
-DF_SAR_INDIVIDUAL  = DF_SAR[DF_SAR["smart_segment_id"] == 1] if DF_SAR is not None else None
+DF_SAR_BUSINESS    = DF_SAR[DF_SAR["dynamic_segment"] == 0] if DF_SAR is not None else None
+DF_SAR_INDIVIDUAL  = DF_SAR[DF_SAR["dynamic_segment"] == 1] if DF_SAR is not None else None
 
 _total      = len(DF)
 _biz_count  = len(DF_BUSINESS)
@@ -73,7 +73,7 @@ _ind_count  = len(DF_INDIVIDUAL)
 _alert_count= int(DF["alerts"].sum())
 _fp_count   = int(DF["false_positives"].sum())
 print(f"Alerts data: {_total:,} rows | Business={_biz_count:,} Individual={_ind_count:,}")
-print(f"SS data: {'loaded (' + str(len(DF_SS)) + ' rows)' if DF_SS is not None else 'not found — run python ss_data_prep.py'}")
+print(f"SS data: {'loaded (' + str(len(DF_SS)) + ' rows)' if DF_SS is not None else 'not found — run python ds_data_prep.py'}")
 _sar_status = (f"loaded ({len(DF_SAR)} rows, {int(DF_SAR['is_sar'].sum())} SARs)" if DF_SAR is not None else "not found - run python simulate_sars.py")
 print(f"SAR simulation: {_sar_status}")
 
@@ -373,8 +373,8 @@ _startup_cluster_cache = {}
 if DF_SS is not None:
     try:
         print("Pre-computing cluster cache at startup...")
-        import ss_data_prep, lambda_ss_performance
-        _sc_fig, _sc_stats, _sc_df = lambda_ss_performance.perform_clustering(DF_SS, "All", 4)
+        import ds_data_prep, lambda_ds_performance
+        _sc_fig, _sc_stats, _sc_df = lambda_ds_performance.perform_clustering(DF_SS, "All", 4)
         _startup_cluster_cache = {
             "df_clustered":  _sc_df,
             "df_enriched":   _enrich_cluster_df(_sc_df),
@@ -392,7 +392,7 @@ COL_MAP = {
     "TRXN_AMT_MONTHLY": "trxn_amt_monthly",
 }
 
-# SAR simulation uses ss_segmentation_data column names (slightly different from main DF)
+# SAR simulation uses ds_segmentation_data column names (slightly different from main DF)
 SAR_COL_MAP = {
     "AVG_TRXNS_WEEK":   "avg_num_trxns",
     "AVG_TRXN_AMT":     "avg_weekly_trxn_amt",
@@ -527,7 +527,7 @@ def compute_segment_stats(df):
     lines = ["=== PRE-COMPUTED SEGMENT STATS (copy verbatim, do not compute new numbers) ==="]
     lines.append("### Segment Overview\n")
     for seg_id, name in [(0, "Business"), (1, "Individual")]:
-        seg = df[df["smart_segment_id"] == seg_id]
+        seg = df[df["dynamic_segment"] == seg_id]
         n         = len(seg)
         alerts    = int(seg["alerts"].sum())
         fp        = int(seg["false_positives"].sum())
@@ -649,7 +649,7 @@ def tool_executor(tool_name, tool_input):
                     f"Valid options: AVG_TRXNS_WEEK, AVG_TRXN_AMT, TRXN_AMT_MONTHLY."), None
         df_seg  = DF_BUSINESS if segment == "Business" else DF_INDIVIDUAL
         stats   = compute_threshold_stats(df_seg, col)
-        line_fig, _ = lambda_ss_performance.plot_thresholds_tuning(df_seg, col, 0.1, segment)
+        line_fig, _ = lambda_ds_performance.plot_thresholds_tuning(df_seg, col, 0.1, segment)
         tbl_fig = make_figures.threshold_tuning_figure(df_seg, col, segment)
         return stats, (line_fig, tbl_fig)
 
@@ -720,7 +720,7 @@ def tool_executor(tool_name, tool_input):
         return stats, tbl_fig
 
     elif tool_name == "alerts_distribution":
-        bar_fig = lambda_ss_performance.alerts_distribution(DF)
+        bar_fig = lambda_ds_performance.alerts_distribution(DF)
         tbl_fig = make_figures.segment_stats_figure(DF)
         return compute_segment_stats(DF), (bar_fig, tbl_fig)
 
@@ -728,7 +728,7 @@ def tool_executor(tool_name, tool_input):
         customer_type = tool_input.get("customer_type", "All")
         n_clusters    = tool_input.get("n_clusters", 4)
         df_src        = DF_SS if DF_SS is not None else DF
-        scatter_fig, stats, df_clustered = lambda_ss_performance.perform_clustering(
+        scatter_fig, stats, df_clustered = lambda_ds_performance.perform_clustering(
             df_src, customer_type, n_clusters
         )
         _cluster_cache.update({
@@ -742,18 +742,18 @@ def tool_executor(tool_name, tool_input):
             "BUSINESS":   ["ACCOUNT_TYPE", "ACCOUNT_AGE_CATEGORY"],
             "INDIVIDUAL": ["ACCOUNT_TYPE", "GENDER", "AGE_CATEGORY", "INCOME_BAND"],
         }
-        treemap_fig = lambda_ss_performance.smartseg_tree_dynamic(
+        treemap_fig = lambda_ds_performance.smartseg_tree_dynamic(
             df_clustered, customer_type, dims=ss_dims, df_rule_sweep=DF_RULE_SWEEP
         )
         return stats, (scatter_fig, treemap_fig)
 
     elif tool_name == "prepare_segmentation_data":
-        import ss_data_prep
+        import ds_data_prep
         try:
-            df_out = ss_data_prep.prepare_data()
+            df_out = ds_data_prep.prepare_data()
             DF_SS  = df_out
             summary = (
-                f"Data prep complete — docs/ss_segmentation_data.csv\n"
+                f"Data prep complete — docs/ds_segmentation_data.csv\n"
                 f"Rows: {len(df_out):,} | Columns: {len(df_out.columns)}\n"
                 f"customer_type: {df_out['customer_type'].value_counts().to_dict()}"
             )
@@ -761,11 +761,11 @@ def tool_executor(tool_name, tool_input):
         except Exception as e:
             return f"Data prep error: {e}", None
 
-    elif tool_name == "ss_cluster_analysis":
-        import ss_data_prep
+    elif tool_name == "ds_cluster_analysis":
+        import ds_data_prep
         if DF_SS is None:
-            print("ss_cluster_analysis: DF_SS not loaded — running prepare_data() first ...")
-            DF_SS = ss_data_prep.prepare_data()
+            print("ds_cluster_analysis: DF_SS not loaded — running prepare_data() first ...")
+            DF_SS = ds_data_prep.prepare_data()
         customer_type   = tool_input.get("customer_type", "All")
         n_clusters      = tool_input.get("n_clusters", 4)
         filter_clusters = tool_input.get("filter_clusters", None)
@@ -803,14 +803,14 @@ def tool_executor(tool_name, tool_input):
             keep_0based  = {cluster_vals[c - 1] for c in filter_clusters
                             if 1 <= c <= len(cluster_vals)}
             df_filtered  = df_clustered[df_clustered["cluster"].isin(keep_0based)].copy()
-            treemap_fig  = lambda_ss_performance.smartseg_tree_dynamic(
+            treemap_fig  = lambda_ds_performance.smartseg_tree_dynamic(
                 df_filtered, f"{customer_type} (clusters {filter_clusters})", dims=ss_dims, df_rule_sweep=DF_RULE_SWEEP
             )
             return f"Filtered to clusters {filter_clusters}.\n\n{stats}", (filtered_scatter, treemap_fig)
 
         else:
             # First call: run full clustering and cache results
-            scatter_fig, stats, df_clustered = lambda_ss_performance.perform_clustering(
+            scatter_fig, stats, df_clustered = lambda_ds_performance.perform_clustering(
                 DF_SS, customer_type, n_clusters
             )
             _cluster_cache.update({
@@ -820,7 +820,7 @@ def tool_executor(tool_name, tool_input):
                 "stats":         stats,
                 "customer_type": customer_type,
             })
-            treemap_fig  = lambda_ss_performance.smartseg_tree_dynamic(
+            treemap_fig  = lambda_ds_performance.smartseg_tree_dynamic(
                 df_clustered, customer_type, dims=ss_dims, df_rule_sweep=DF_RULE_SWEEP
             )
             stats_table  = make_figures.cluster_stats_table(df_clustered, customer_type)
@@ -911,7 +911,7 @@ def _chart_content(tool_name, tool_input, fig):
         blocks.append({"type": "graph", "figure": fig})
         return blocks
 
-    elif tool_name in ("cluster_analysis", "ss_cluster_analysis"):
+    elif tool_name in ("cluster_analysis", "ds_cluster_analysis"):
         ct     = tool_input.get("customer_type", "All")
         if isinstance(fig, tuple) and len(fig) == 3:
             figs   = list(fig)
@@ -1392,10 +1392,10 @@ def handle_chat(new_message, pending_prompt, messages):
             cluster_vals = sorted(df_clustered["cluster"].unique())
             keep_0based  = {cluster_vals[c - 1] for c in filter_nums if 1 <= c <= len(cluster_vals)}
             df_filtered  = df_clustered[df_clustered["cluster"].isin(keep_0based)].copy()
-            treemap_fig  = lambda_ss_performance.smartseg_tree_dynamic(
+            treemap_fig  = lambda_ds_performance.smartseg_tree_dynamic(
                 df_filtered, f"{customer_type} — clusters {filter_nums}", dims=ss_dims, df_rule_sweep=DF_RULE_SWEEP
             )
-            chart_results = [("ss_cluster_analysis",
+            chart_results = [("ds_cluster_analysis",
                               {"customer_type": customer_type, "filter_clusters": filter_nums},
                               (filtered_scatter, treemap_fig))]
     # Strip DISPLAY_CLUSTERS line and PRE-COMPUTED ANALYSIS markers from displayed text
@@ -1479,7 +1479,7 @@ def handle_chat(new_message, pending_prompt, messages):
 
     # Signal treemap store if a clustering tool just ran
     treemap_store = no_update
-    if any(tn in ("cluster_analysis", "ss_cluster_analysis") for tn, _, _ in (chart_results or [])):
+    if any(tn in ("cluster_analysis", "ds_cluster_analysis") for tn, _, _ in (chart_results or [])):
         treemap_store = {"ts": time.time()}
 
     return updated + [bot_response], sweep_store, treemap_store
@@ -1612,7 +1612,7 @@ def refresh_treemap_offcanvas(store_data):
         "BUSINESS":   ["ACCOUNT_TYPE", "ACCOUNT_AGE_CATEGORY"],
         "INDIVIDUAL": ["ACCOUNT_TYPE", "GENDER", "AGE_CATEGORY", "INCOME_BAND"],
     }
-    fig = lambda_ss_performance.smartseg_tree_dynamic(
+    fig = lambda_ds_performance.smartseg_tree_dynamic(
         df_clustered, ct, dims=ss_dims, df_rule_sweep=DF_RULE_SWEEP
     )
     fig.update_layout(height=380, margin=dict(t=30, b=10, l=10, r=10))

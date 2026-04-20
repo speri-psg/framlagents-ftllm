@@ -42,10 +42,10 @@ TOOLS = [
             "name": "prepare_segmentation_data",
             "description": (
                 "Process raw customer, account, relationship, and transaction files from ss_files/ "
-                "and produce a flat CSV at docs/ss_segmentation_data.csv ready for clustering. "
+                "and produce a flat CSV at docs/ds_segmentation_data.csv ready for clustering. "
                 "Computes transaction aggregates: avg_trxns_week, avg_trxn_amt, avg_monthly_trxn_amt, "
                 "trxn_count, total_trxn_amt, max_trxn_amt, std_trxn_amt. "
-                "Call this before running ss_cluster_analysis on new raw data."
+                "Call this before running ds_cluster_analysis on new raw data."
             ),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
@@ -53,7 +53,7 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "ss_cluster_analysis",
+            "name": "ds_cluster_analysis",
             "description": (
                 "Perform dynamic segmentation clustering on the ss_files raw data "
                 "(customers, accounts, relationships, transactions). "
@@ -86,7 +86,7 @@ IMPORTANT: You MUST respond entirely in English. Do NOT use any Chinese or other
 
 RULES — follow these exactly:
 1. ALWAYS call a tool. Never answer segmentation or cluster questions from memory.
-2. For clustering with rich demographics (preferred) — call ss_cluster_analysis.
+2. For clustering with rich demographics (preferred) — call ds_cluster_analysis.
 3. For alert/FP distribution by segment — call alerts_distribution.
 4. For the legacy alerts dataset — call cluster_analysis only if the user explicitly asks.
 5. Do NOT call multiple segmentation tools for the same request — pick exactly one.

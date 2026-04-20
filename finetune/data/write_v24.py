@@ -3,7 +3,7 @@ V24 training examples — gaps from V23 benchmark (2026-04-19).
 
 Targets:
   W. Segmentation routing (4 examples)
-     — S01 (tool=None), S02 (tool=segment_customers) — reinforce ss_cluster_analysis
+     — S01 (tool=None), S02 (tool=segment_customers) — reinforce ds_cluster_analysis
   A. rule_2d_sweep explicit risk_factor (4 examples)
      — D01 (Structuring), D02 (Velocity Single), D03 (Detect Excessive), N05 (Funnel Account)
      — all emitted empty risk_factor; model reasons correctly but args not populated
@@ -52,7 +52,7 @@ SEG_SYSTEM = (
     "You identify natural customer behavioral segments using unsupervised K-Means clustering. "
     "IMPORTANT: You MUST respond entirely in English.\n\n"
     "RULES — follow these exactly:\n"
-    "1. For clustering or segmentation requests: call ss_cluster_analysis immediately.\n"
+    "1. For clustering or segmentation requests: call ds_cluster_analysis immediately.\n"
     "2. For alert/FP distribution by segment: call alerts_distribution.\n"
     "3. Do NOT answer segmentation questions from memory — always call the tool.\n"
     "4. After receiving tool results, copy the PRE-COMPUTED section verbatim.\n"
@@ -89,7 +89,7 @@ POLICY_SYSTEM = (
 # --- Pre-computed tool results ------------------------------------------------
 
 PC_CLUSTER_BIZ = """\
-Tool result for ss_cluster_analysis:
+Tool result for ds_cluster_analysis:
 === PRE-COMPUTED CLUSTER STATS (copy verbatim, do not compute new numbers) ===
 Segment: Business | Active accounts: 3,551 (excluded 0 with no transactions)
 Clusters: 4 | Features: 5 numeric + 12 encoded categorical (4 original)
@@ -130,7 +130,7 @@ Cluster 4
 === END PRE-COMPUTED CLUSTER STATS ==="""
 
 PC_CLUSTER_IND = """\
-Tool result for ss_cluster_analysis:
+Tool result for ds_cluster_analysis:
 === PRE-COMPUTED CLUSTER STATS (copy verbatim, do not compute new numbers) ===
 Segment: Individual | Active accounts: 2,184 (excluded 0 with no transactions)
 Clusters: 4 | Features: 5 numeric + 12 encoded categorical (4 original)
@@ -272,7 +272,7 @@ examples.append({"messages": [
     {"role": "system", "content": SEG_SYSTEM},
     {"role": "user", "content": "Cluster Business customers by transaction behavior"},
     {"role": "assistant", "content": None, "tool_calls": [
-        tc("w1", "ss_cluster_analysis", {"customer_type": "Business"})
+        tc("w1", "ds_cluster_analysis", {"customer_type": "Business"})
     ]},
     {"role": "tool", "tool_call_id": "w1", "content": PC_CLUSTER_BIZ},
     {"role": "assistant", "content": (
@@ -295,7 +295,7 @@ examples.append({"messages": [
     {"role": "system", "content": SEG_SYSTEM},
     {"role": "user", "content": "Which Business cluster has the highest transaction volume?"},
     {"role": "assistant", "content": None, "tool_calls": [
-        tc("w2", "ss_cluster_analysis", {"customer_type": "Business"})
+        tc("w2", "ds_cluster_analysis", {"customer_type": "Business"})
     ]},
     {"role": "tool", "tool_call_id": "w2", "content": PC_CLUSTER_BIZ},
     {"role": "assistant", "content": (
@@ -309,7 +309,7 @@ examples.append({"messages": [
     {"role": "system", "content": SEG_SYSTEM},
     {"role": "user", "content": "Cluster Individual customers by transaction behavior"},
     {"role": "assistant", "content": None, "tool_calls": [
-        tc("w3", "ss_cluster_analysis", {"customer_type": "Individual"})
+        tc("w3", "ds_cluster_analysis", {"customer_type": "Individual"})
     ]},
     {"role": "tool", "tool_call_id": "w3", "content": PC_CLUSTER_IND},
     {"role": "assistant", "content": (
@@ -332,7 +332,7 @@ examples.append({"messages": [
     {"role": "system", "content": SEG_SYSTEM},
     {"role": "user", "content": "Show me the behavioral segments for Business customers"},
     {"role": "assistant", "content": None, "tool_calls": [
-        tc("w4", "ss_cluster_analysis", {"customer_type": "Business"})
+        tc("w4", "ds_cluster_analysis", {"customer_type": "Business"})
     ]},
     {"role": "tool", "tool_call_id": "w4", "content": PC_CLUSTER_BIZ},
     {"role": "assistant", "content": (

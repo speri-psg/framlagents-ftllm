@@ -1,14 +1,14 @@
 """
 prepare_cluster_labels.py — Pre-compute K-Means cluster labels for all customers.
 
-Uses identical parameters to perform_clustering() in lambda_ss_performance.py
+Uses identical parameters to perform_clustering() in lambda_ds_performance.py
 (n_clusters=4, random_state=42) so that cluster numbers match what the app displays
-when a user runs ss_cluster_analysis.
+when a user runs ds_cluster_analysis.
 
 Output: docs/customer_cluster_labels.csv
-  customer_id | smart_segment_id | cluster (1-based, matches app display)
+  customer_id | dynamic_segment | cluster (1-based, matches app display)
 
-Run once after ss_data_prep.py:
+Run once after ds_data_prep.py:
     python prepare_cluster_labels.py
 """
 
@@ -61,7 +61,7 @@ def _cluster_segment(df_seg, seg_name):
     df_active["cluster"] = labels + 1       # 1-based to match app display
 
     print(f"  Cluster sizes: { {c: int((df_active['cluster']==c).sum()) for c in range(1, N_CLUSTERS+1)} }")
-    return df_active[["customer_id", "smart_segment_id", "cluster"]]
+    return df_active[["customer_id", "dynamic_segment", "cluster"]]
 
 
 def main():
@@ -71,7 +71,7 @@ def main():
 
     results = []
     for seg_id, seg_name in [(0, "Business"), (1, "Individual")]:
-        df_seg = df[df["smart_segment_id"] == seg_id]
+        df_seg = df[df["dynamic_segment"] == seg_id]
         results.append(_cluster_segment(df_seg, seg_name))
 
     out = pd.concat(results, ignore_index=True)

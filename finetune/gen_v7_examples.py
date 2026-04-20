@@ -54,7 +54,7 @@ SYS_SEGMENTATION = (
     "IMPORTANT: You MUST respond entirely in English. Do NOT use any Chinese or other non-English characters.\n\n"
     "RULES — follow these exactly:\n"
     "1. ALWAYS call a tool. Never answer segmentation or cluster questions from memory.\n"
-    "2. For clustering with rich demographics (preferred) — call ss_cluster_analysis.\n"
+    "2. For clustering with rich demographics (preferred) — call ds_cluster_analysis.\n"
     "3. For alert/FP distribution by segment — call alerts_distribution.\n"
     "4. For the legacy alerts dataset — call cluster_analysis only if the user explicitly asks.\n"
     "5. Do NOT call multiple segmentation tools for the same request — pick exactly one.\n"

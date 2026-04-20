@@ -46,7 +46,7 @@ CLUSTER_SYSTEM = (
     "unsupervised K-Means clustering and explain their AML risk profiles. IMPORTANT: You MUST respond entirely in English.\n\n"
     "RULES \u2014 follow these exactly:\n"
     "1. ALWAYS call a tool. Never answer segmentation or cluster questions from memory.\n"
-    "2. For clustering with rich demographics (preferred) \u2014 call ss_cluster_analysis.\n"
+    "2. For clustering with rich demographics (preferred) \u2014 call ds_cluster_analysis.\n"
     "3. For alert/FP distribution by segment \u2014 call alerts_distribution.\n"
     "4. customer_type must be exactly one of: Business, Individual, All. Default to All if not specified.\n"
     "5. n_clusters must be an integer 2-8. Default is 4.\n"
@@ -490,7 +490,7 @@ examples.append({"messages": [
 examples.append({"messages": [
     {"role": "system", "content": CLUSTER_SYSTEM},
     {"role": "user", "content": "Run a 2D sweep for Elder Abuse for Cluster 2"},
-    {"role": "assistant", "content": None, "tool_calls": [tc("call_ex344", "ss_cluster_analysis", {"customer_type": "All", "n_clusters": 4})]},
+    {"role": "assistant", "content": None, "tool_calls": [tc("call_ex344", "ds_cluster_analysis", {"customer_type": "All", "n_clusters": 4})]},
     {"role": "tool", "content": pc_cluster_all, "tool_call_id": "call_ex344"},
     {"role": "assistant", "content": (
         pc_cluster_all + "\n\n"
@@ -502,7 +502,7 @@ examples.append({"messages": [
 examples.append({"messages": [
     {"role": "system", "content": CLUSTER_SYSTEM},
     {"role": "user", "content": "Show Elder Abuse SAR backtest for Cluster 4"},
-    {"role": "assistant", "content": None, "tool_calls": [tc("call_ex345", "ss_cluster_analysis", {"customer_type": "All", "n_clusters": 4})]},
+    {"role": "assistant", "content": None, "tool_calls": [tc("call_ex345", "ds_cluster_analysis", {"customer_type": "All", "n_clusters": 4})]},
     {"role": "tool", "content": pc_cluster_all, "tool_call_id": "call_ex345"},
     {"role": "assistant", "content": (
         pc_cluster_all + "\n\n"
@@ -514,7 +514,7 @@ examples.append({"messages": [
 examples.append({"messages": [
     {"role": "system", "content": CLUSTER_SYSTEM},
     {"role": "user", "content": "Run a SAR backtest for Activity Deviation ACH in Cluster 2"},
-    {"role": "assistant", "content": None, "tool_calls": [tc("call_ex346", "ss_cluster_analysis", {"customer_type": "All", "n_clusters": 4})]},
+    {"role": "assistant", "content": None, "tool_calls": [tc("call_ex346", "ds_cluster_analysis", {"customer_type": "All", "n_clusters": 4})]},
     {"role": "tool", "content": pc_cluster_all, "tool_call_id": "call_ex346"},
     {"role": "assistant", "content": (
         pc_cluster_all + "\n\n"

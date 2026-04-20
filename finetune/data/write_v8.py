@@ -47,7 +47,7 @@ CLUSTER_SYSTEM = (
     "Do NOT use any Chinese or other non-English characters.\n\n"
     "RULES \u2014 follow these exactly:\n"
     "1. ALWAYS call a tool. Never answer segmentation or cluster questions from memory.\n"
-    "2. For clustering with rich demographics (preferred) \u2014 call ss_cluster_analysis.\n"
+    "2. For clustering with rich demographics (preferred) \u2014 call ds_cluster_analysis.\n"
     "3. For alert/FP distribution by segment \u2014 call alerts_distribution.\n"
     "4. For the legacy alerts dataset \u2014 call cluster_analysis only if the user explicitly asks.\n"
     "5. Do NOT call multiple segmentation tools for the same request \u2014 pick exactly one.\n"
@@ -998,11 +998,11 @@ pc_biz_clusters = (
     "HIGHEST-RISK CLUSTER: Cluster 4 (n=643, avg_num_trxns=1.0)."
 )
 
-# ex238 — "show only highest-risk cluster" → ss_cluster_analysis + DISPLAY_CLUSTERS
+# ex238 — "show only highest-risk cluster" → ds_cluster_analysis + DISPLAY_CLUSTERS
 examples.append({"messages": [
     {"role": "system", "content": CLUSTER_SYSTEM},
     {"role": "user", "content": "Show only the highest-risk Business cluster"},
-    {"role": "assistant", "content": None, "tool_calls": [tc("call_ex238", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
+    {"role": "assistant", "content": None, "tool_calls": [tc("call_ex238", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
     {"role": "tool", "content": pc_biz_clusters, "tool_call_id": "call_ex238"},
     {"role": "assistant", "content": (
         pc_biz_clusters + "\n\n"
@@ -1016,7 +1016,7 @@ examples.append({"messages": [
 examples.append({"messages": [
     {"role": "system", "content": CLUSTER_SYSTEM},
     {"role": "user", "content": "Show me only the high-risk Business customers"},
-    {"role": "assistant", "content": None, "tool_calls": [tc("call_ex239", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
+    {"role": "assistant", "content": None, "tool_calls": [tc("call_ex239", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
     {"role": "tool", "content": pc_biz_clusters, "tool_call_id": "call_ex239"},
     {"role": "assistant", "content": (
         pc_biz_clusters + "\n\n"
@@ -1045,7 +1045,7 @@ pc_indiv_clusters = (
 examples.append({"messages": [
     {"role": "system", "content": CLUSTER_SYSTEM},
     {"role": "user", "content": "Show only the highest-risk Individual cluster"},
-    {"role": "assistant", "content": None, "tool_calls": [tc("call_ex240", "ss_cluster_analysis", {"customer_type": "Individual", "n_clusters": 4})]},
+    {"role": "assistant", "content": None, "tool_calls": [tc("call_ex240", "ds_cluster_analysis", {"customer_type": "Individual", "n_clusters": 4})]},
     {"role": "tool", "content": pc_indiv_clusters, "tool_call_id": "call_ex240"},
     {"role": "assistant", "content": (
         pc_indiv_clusters + "\n\n"
@@ -1059,7 +1059,7 @@ examples.append({"messages": [
 examples.append({"messages": [
     {"role": "system", "content": CLUSTER_SYSTEM},
     {"role": "user", "content": "Show the top risk cluster for Business"},
-    {"role": "assistant", "content": None, "tool_calls": [tc("call_ex241", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
+    {"role": "assistant", "content": None, "tool_calls": [tc("call_ex241", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
     {"role": "tool", "content": pc_biz_clusters, "tool_call_id": "call_ex241"},
     {"role": "assistant", "content": (
         pc_biz_clusters + "\n\n"
@@ -1073,7 +1073,7 @@ examples.append({"messages": [
 examples.append({"messages": [
     {"role": "system", "content": CLUSTER_SYSTEM},
     {"role": "user", "content": "Which Business cluster should I focus on for AML risk?"},
-    {"role": "assistant", "content": None, "tool_calls": [tc("call_ex242", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
+    {"role": "assistant", "content": None, "tool_calls": [tc("call_ex242", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
     {"role": "tool", "content": pc_biz_clusters, "tool_call_id": "call_ex242"},
     {"role": "assistant", "content": (
         pc_biz_clusters + "\n\n"

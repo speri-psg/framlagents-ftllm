@@ -3,7 +3,7 @@ import  os
 try:
     import boto3
 except ImportError:
-    boto3 = None  # only needed for show_ss_performance() (legacy AWS Lambda function)
+    boto3 = None  # only needed for show_ds_performance() (legacy AWS Lambda function)
 try:
     import botocore
 except ImportError:
@@ -30,15 +30,15 @@ def segment_threshold_tuning(df, segment, threshold):
     segment_threshold_averages=[730, 220]
     segment_names=['Business', 'Individual']
     segments.append(segment)
-    segment_total_alerts.append(df[(df['smart_segment_id'] == segment)& ( df[threshold] >= segment_current_thresholds[segment]) & (df['alerts'] == 1)].shape[0])
-    segment_fps.append(df[(df['smart_segment_id'] == segment) & ( df[threshold] >= segment_current_thresholds[segment]) & (df['false_positives'] == 1)].shape[0])
-    segment_btl10_alerts.append(df[(df['smart_segment_id'] == segment)& (df[threshold] >= (segment_current_thresholds[segment]  - segment_current_thresholds[segment] * .1)) & (df['alerts'] == 1)].shape[0] )
-    segment_btl20_alerts.append(df[(df['smart_segment_id'] == segment) & (
+    segment_total_alerts.append(df[(df['dynamic_segment'] == segment)& ( df[threshold] >= segment_current_thresholds[segment]) & (df['alerts'] == 1)].shape[0])
+    segment_fps.append(df[(df['dynamic_segment'] == segment) & ( df[threshold] >= segment_current_thresholds[segment]) & (df['false_positives'] == 1)].shape[0])
+    segment_btl10_alerts.append(df[(df['dynamic_segment'] == segment)& (df[threshold] >= (segment_current_thresholds[segment]  - segment_current_thresholds[segment] * .1)) & (df['alerts'] == 1)].shape[0] )
+    segment_btl20_alerts.append(df[(df['dynamic_segment'] == segment) & (
                 df[threshold] >= (segment_current_thresholds[segment]  - segment_current_thresholds[segment] * .2)) & (df['alerts'] == 1)].shape[0])
-    segment_atl10_alerts.append(df[(df['smart_segment_id'] == segment)& (df[threshold] >= (segment_current_thresholds[segment]  + segment_current_thresholds[segment] * .1)) & (df['alerts'] == 1)].shape[0] )
-    segment_atl20_alerts.append(df[(df['smart_segment_id'] == segment) & (
+    segment_atl10_alerts.append(df[(df['dynamic_segment'] == segment)& (df[threshold] >= (segment_current_thresholds[segment]  + segment_current_thresholds[segment] * .1)) & (df['alerts'] == 1)].shape[0] )
+    segment_atl20_alerts.append(df[(df['dynamic_segment'] == segment) & (
                 df[threshold] >= (segment_current_thresholds[segment]  + segment_current_thresholds[segment] * .2)) & (df['alerts'] == 1)].shape[0])
-    segment_ta_alerts.append(df[(df['smart_segment_id'] == segment)& (df['alerts'] == 1) &(
+    segment_ta_alerts.append(df[(df['dynamic_segment'] == segment)& (df['alerts'] == 1) &(
                 df[threshold] >= (segment_threshold_averages[segment] ))].shape[0])
     data = [
         go.Bar(name='Total Alerts', x=[segment_names[segment]], y=segment_total_alerts),
@@ -67,12 +67,12 @@ def segment_threshold_tuning(df, segment, threshold):
     return fig
 def alerts_distribution(df):
     segment_total_alerts = [
-        df[(df['smart_segment_id'] == 0) & (df['alerts'] == 1)].shape[0],
-        df[(df['smart_segment_id'] == 1) & (df['alerts'] == 1)].shape[0],
+        df[(df['dynamic_segment'] == 0) & (df['alerts'] == 1)].shape[0],
+        df[(df['dynamic_segment'] == 1) & (df['alerts'] == 1)].shape[0],
     ]
     segment_fps = [
-        df[(df['smart_segment_id'] == 0) & (df['false_positives'] == 1)].shape[0],
-        df[(df['smart_segment_id'] == 1) & (df['false_positives'] == 1)].shape[0],
+        df[(df['dynamic_segment'] == 0) & (df['false_positives'] == 1)].shape[0],
+        df[(df['dynamic_segment'] == 1) & (df['false_positives'] == 1)].shape[0],
     ]
 
     data = [
@@ -359,7 +359,7 @@ def add_sub_plots(fig, subplot, row_id, col_id, x_title, y_title):
         fig.update_yaxes(title_text=y_title, row=row_id, col=col_id)
     return fig
 
-def show_ss_performance():
+def show_ds_performance():
     #os.chdir("/tmp/") # this is for a lambda function which has only access to /tmp of aws EC2
     try:
         s3 = boto3.client('s3')
@@ -369,8 +369,8 @@ def show_ss_performance():
         df_alerts = pd.read_excel("framl_ss_data.xlsx", sheet_name='alerts')
         #print(df_alerts.head(5))
 
-        for segment in df_alerts['smart_segment_id'].unique():
-            df_segment = df_alerts[df_alerts['smart_segment_id'] == segment] #segment level transactions, trxn aggregates and alerts
+        for segment in df_alerts['dynamic_segment'].unique():
+            df_segment = df_alerts[df_alerts['dynamic_segment'] == segment] #segment level transactions, trxn aggregates and alerts
             segment_type = df_segment['customer_type'].unique()
             fig1 = plot_pct_metric(df_segment, 'Jstat')
             threshold = 'avg_trxn_amt'
@@ -409,9 +409,9 @@ def perform_clustering(df, customer_type=None, n_clusters=4):
 
     # Filter by segment
     if customer_type == "Business":
-        df_work = df[df['smart_segment_id'] == 0].copy()
+        df_work = df[df['dynamic_segment'] == 0].copy()
     elif customer_type == "Individual":
-        df_work = df[df['smart_segment_id'] == 1].copy()
+        df_work = df[df['dynamic_segment'] == 1].copy()
     else:
         df_work = df.copy()
 
@@ -738,7 +738,7 @@ def lambda_handler(event, context):
     actionGroup = event['actionGroup']
     function = event['function']
     parameters = event.get('parameters', [])
-    bucket_name = show_ss_performance()
+    bucket_name = show_ds_performance()
     # Execute your business logic here. For more information, refer to: https://docs.aws.amazon.com/bedrock/latest/userguide/agents-lambda.html
     responseBody =  {
         "TEXT": {
@@ -764,5 +764,5 @@ def lambda_handler(event, context):
     return response
 if __name__ == "__main__":
 
-    response = show_ss_performance()
+    response = show_ds_performance()
     i=0

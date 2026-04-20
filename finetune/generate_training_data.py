@@ -157,7 +157,7 @@ def load_data(csv_path: str) -> pd.DataFrame:
     df["alerts"] = df["alerts"].map({"Yes": 1, "No": 0})
     df["false_positives"] = df["false_positives"].map({"Yes": 1, "No": 0})
     df["false_negatives"] = df["false_negatives"].map({"Yes": 1, "No": 0})
-    df["smart_segment_id"] = df["customer_type"].map({"BUSINESS": 0, "INDIVIDUAL": 1})
+    df["dynamic_segment"] = df["customer_type"].map({"BUSINESS": 0, "INDIVIDUAL": 1})
     return df
 
 
@@ -217,7 +217,7 @@ def compute_threshold_sweep(df_seg: pd.DataFrame, col: str) -> dict:
 def compute_segment_stats(df: pd.DataFrame) -> dict:
     stats = {}
     for seg_id, name in [(0, "Business"), (1, "Individual")]:
-        seg = df[df["smart_segment_id"] == seg_id]
+        seg = df[df["dynamic_segment"] == seg_id]
         total = len(seg)
         alerts = int(seg["alerts"].sum())
         fp = int(seg["false_positives"].sum())
@@ -296,7 +296,7 @@ def make_threshold_examples(df: pd.DataFrame) -> list:
     examples = []
     for (segment, col_key), queries in query_variants.items():
         df_col = COL_MAP[col_key]
-        df_seg = df[df["smart_segment_id"] == (0 if segment == "Business" else 1)]
+        df_seg = df[df["dynamic_segment"] == (0 if segment == "Business" else 1)]
         s = compute_threshold_sweep(df_seg, df_col)
         col_label = COL_LABELS[col_key]
 
@@ -545,7 +545,7 @@ def make_multi_tool_examples(df: pd.DataFrame, seg_stats: dict) -> list:
     3 examples where the agent calls segment_stats THEN threshold_tuning.
     Teaches the model to chain multiple tool calls when the query spans both.
     """
-    df_biz = df[df["smart_segment_id"] == 0]
+    df_biz = df[df["dynamic_segment"] == 0]
     s = compute_threshold_sweep(df_biz, "avg_num_trxns")
     seg = seg_stats["stats"]
     biz = seg["Business"]
@@ -780,8 +780,8 @@ def main():
 
     print(f"Loading data from {args.data_path} ...")
     df = load_data(args.data_path)
-    biz_n = int((df["smart_segment_id"] == 0).sum())
-    ind_n = int((df["smart_segment_id"] == 1).sum())
+    biz_n = int((df["dynamic_segment"] == 0).sum())
+    ind_n = int((df["dynamic_segment"] == 1).sum())
     print(f"  Loaded {len(df):,} rows — Business={biz_n:,}, Individual={ind_n:,}")
 
     seg_stats = compute_segment_stats(df)

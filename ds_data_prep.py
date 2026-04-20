@@ -1,5 +1,5 @@
 """
-ss_data_prep.py — Dynamic Segmentation Data Preparation
+ds_data_prep.py — Dynamic Segmentation Data Preparation
 
 Schema:
   aml_s_customers.csv          id → customer_id
@@ -7,10 +7,10 @@ Schema:
   aml_s_account_relationship.csv  account_id, customer_id (many-to-many)
   aml_s_transactions.csv       subject_id = account_id, timestamp, amount
 
-Output: docs/ss_segmentation_data.csv — one row per customer-account pair
+Output: docs/ds_segmentation_data.csv — one row per customer-account pair
 
 Usage:
-    python ss_data_prep.py
+    python ds_data_prep.py
 """
 
 import os
@@ -18,7 +18,7 @@ import pandas as pd
 import numpy as np
 
 SS_DIR      = "ss_files"
-OUTPUT_FILE = "docs/ss_segmentation_data.csv"
+OUTPUT_FILE = "docs/ds_segmentation_data.csv"
 REF_DATE    = pd.Timestamp.now()
 
 
@@ -191,10 +191,10 @@ def prepare_data():
         'ofac':                 'OFAC',
     })
 
-    # Derive customer_type and smart_segment_id from entity flag
+    # Derive customer_type and dynamic_segment from entity flag
     # entity=1 (True) → Business, entity=0 (False) → Individual
     df['customer_type']    = df['entity'].map({1: 'BUSINESS', 0: 'INDIVIDUAL'}).fillna('INDIVIDUAL')
-    df['smart_segment_id'] = df['entity'].map({1: 0, 0: 1}).fillna(1).astype(int)
+    df['dynamic_segment'] = df['entity'].map({1: 0, 0: 1}).fillna(1).astype(int)
     print(f"  customer_type distribution: {df['customer_type'].value_counts().to_dict()}")
 
     # Age category bins

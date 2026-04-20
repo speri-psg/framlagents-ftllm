@@ -69,7 +69,7 @@ SEG_SYSTEM = (
     "Do NOT use any Chinese or other non-English characters.\n\n"
     "RULES \u2014 follow these exactly:\n"
     "1. ALWAYS call a tool. Never answer segmentation or cluster questions from memory.\n"
-    "2. For clustering with rich demographics (preferred) \u2014 call ss_cluster_analysis.\n"
+    "2. For clustering with rich demographics (preferred) \u2014 call ds_cluster_analysis.\n"
     "3. For simple segment counts only \u2014 call segment_stats.\n"
     "4. customer_type must be exactly one of: Business, Individual, All. Default to All if not specified.\n"
     "5. n_clusters must be an integer 2-8. Default is 4.\n"
@@ -560,7 +560,7 @@ examples.append({"messages": [
     {"role": "system", "content": SEG_SYSTEM},
     {"role": "user", "content": "Which cluster of Business customers has the highest transaction volume?"},
     {"role": "assistant", "content": None,
-     "tool_calls": [tc("call_ex423", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
+     "tool_calls": [tc("call_ex423", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
     {"role": "tool", "content": pc_business_4cluster, "tool_call_id": "call_ex423"},
     {"role": "assistant", "content": (
         pc_business_4cluster + "\n\n"
@@ -574,7 +574,7 @@ examples.append({"messages": [
     {"role": "system", "content": SEG_SYSTEM},
     {"role": "user", "content": "Segment Business customers into clusters"},
     {"role": "assistant", "content": None,
-     "tool_calls": [tc("call_ex424", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
+     "tool_calls": [tc("call_ex424", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
     {"role": "tool", "content": pc_business_4cluster, "tool_call_id": "call_ex424"},
     {"role": "assistant", "content": (
         pc_business_4cluster + "\n\n"
@@ -588,7 +588,7 @@ examples.append({"messages": [
     {"role": "system", "content": SEG_SYSTEM},
     {"role": "user", "content": "Show Business customer segments"},
     {"role": "assistant", "content": None,
-     "tool_calls": [tc("call_ex425", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
+     "tool_calls": [tc("call_ex425", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
     {"role": "tool", "content": pc_business_4cluster, "tool_call_id": "call_ex425"},
     {"role": "assistant", "content": (
         pc_business_4cluster + "\n\n"
@@ -602,7 +602,7 @@ examples.append({"messages": [
     {"role": "system", "content": SEG_SYSTEM},
     {"role": "user", "content": "Run clustering for Business accounts"},
     {"role": "assistant", "content": None,
-     "tool_calls": [tc("call_ex426", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
+     "tool_calls": [tc("call_ex426", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
     {"role": "tool", "content": pc_business_4cluster, "tool_call_id": "call_ex426"},
     {"role": "assistant", "content": (
         pc_business_4cluster + "\n\n"
@@ -616,7 +616,7 @@ examples.append({"messages": [
     {"role": "system", "content": SEG_SYSTEM},
     {"role": "user", "content": "Business segment cluster analysis"},
     {"role": "assistant", "content": None,
-     "tool_calls": [tc("call_ex427", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
+     "tool_calls": [tc("call_ex427", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
     {"role": "tool", "content": pc_business_4cluster, "tool_call_id": "call_ex427"},
     {"role": "assistant", "content": (
         pc_business_4cluster + "\n\n"
@@ -630,7 +630,7 @@ examples.append({"messages": [
     {"role": "system", "content": SEG_SYSTEM},
     {"role": "user", "content": "What are the Business customer clusters and which has the most transactions?"},
     {"role": "assistant", "content": None,
-     "tool_calls": [tc("call_ex428", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
+     "tool_calls": [tc("call_ex428", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
     {"role": "tool", "content": pc_business_4cluster, "tool_call_id": "call_ex428"},
     {"role": "assistant", "content": (
         pc_business_4cluster + "\n\n"

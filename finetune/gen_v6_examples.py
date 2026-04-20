@@ -59,7 +59,7 @@ SYS_SEGMENTATION = (
     "IMPORTANT: You MUST respond entirely in English. Do NOT use any Chinese or other non-English characters.\n\n"
     "RULES — follow these exactly:\n"
     "1. ALWAYS call a tool. Never answer segmentation or cluster questions from memory.\n"
-    "2. For clustering with rich demographics (preferred) — call ss_cluster_analysis.\n"
+    "2. For clustering with rich demographics (preferred) — call ds_cluster_analysis.\n"
     "3. For alert/FP distribution by segment — call alerts_distribution.\n"
     "4. For the legacy alerts dataset — call cluster_analysis only if the user explicitly asks.\n"
     "5. Do NOT call multiple segmentation tools for the same request — pick exactly one.\n"
@@ -347,7 +347,7 @@ examples = [
     # ex95 — Business 4-cluster: correct highest-risk identification
     ex(SYS_SEGMENTATION, [
         user("Cluster Business customers into 4 segments."),
-        tc("t95", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4}),
+        tc("t95", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4}),
         tr("t95", BIZ_4CLUSTER),
         asst(BIZ_4CLUSTER + "\n\nCluster 4 (n=643, avg_num_trxns=1.0, avg_weekly_trxn_amt=783,507.6) is the highest-risk segment by both transaction frequency and weekly volume across all four clusters."),
     ]),
@@ -355,7 +355,7 @@ examples = [
     # ex96 — Business 4-cluster: different user phrasing
     ex(SYS_SEGMENTATION, [
         user("Show me 4 behavioral clusters for Business customers."),
-        tc("t96", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4}),
+        tc("t96", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4}),
         tr("t96", BIZ_4CLUSTER),
         asst(BIZ_4CLUSTER + "\n\nCluster 4 has the highest avg_num_trxns (1.0) and avg_weekly_trxn_amt (783,507.6) of all four clusters, making it the primary focus for Business AML review."),
     ]),
@@ -363,7 +363,7 @@ examples = [
     # ex97 — Individual 4-cluster: correct highest-risk
     ex(SYS_SEGMENTATION, [
         user("Cluster Individual customers into 4 groups."),
-        tc("t97", "ss_cluster_analysis", {"customer_type": "Individual", "n_clusters": 4}),
+        tc("t97", "ds_cluster_analysis", {"customer_type": "Individual", "n_clusters": 4}),
         tr("t97", IND_4CLUSTER),
         asst(IND_4CLUSTER + "\n\nCluster 3 (n=7,241, avg_num_trxns=6.4, avg_weekly_trxn_amt=4,830.0) is the highest-risk segment by transaction frequency and weekly volume across all four Individual clusters."),
     ]),
@@ -371,7 +371,7 @@ examples = [
     # ex98 — Business 4-cluster: user asks which cluster is riskiest
     ex(SYS_SEGMENTATION, [
         user("Which Business cluster is the highest risk?"),
-        tc("t98", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4}),
+        tc("t98", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4}),
         tr("t98", BIZ_4CLUSTER),
         asst(BIZ_4CLUSTER + "\n\nCluster 4 is the highest-risk segment with avg_num_trxns=1.0 and avg_weekly_trxn_amt=783,507.6 — the largest values in both metrics across all four clusters."),
     ]),
@@ -379,7 +379,7 @@ examples = [
     # ex99 — Business 4-cluster: show highest risk cluster only
     ex(SYS_SEGMENTATION, [
         user("Show me only the highest risk Business cluster."),
-        tc("t99", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4}),
+        tc("t99", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4}),
         tr("t99", BIZ_4CLUSTER),
         asst(BIZ_4CLUSTER + "\n\nCluster 4 (avg_num_trxns=1.0, avg_weekly_trxn_amt=783,507.6) is the highest-risk segment and the primary focus for Business threshold review.\nDISPLAY_CLUSTERS: 4"),
     ]),
@@ -389,7 +389,7 @@ examples = [
     # ex100
     ex(SYS_SEGMENTATION, [
         user("Cluster Business customers into 4 segments."),
-        tc("t100a", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4}),
+        tc("t100a", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4}),
         tr("t100a", BIZ_4CLUSTER),
         asst(BIZ_4CLUSTER + "\n\nCluster 4 (n=643, avg_num_trxns=1.0, avg_weekly_trxn_amt=783,507.6) is the highest-risk segment by both transaction frequency and weekly volume across all four clusters."),
         user("Which cluster should I set the threshold for?"),
@@ -401,7 +401,7 @@ examples = [
     # ex101
     ex(SYS_SEGMENTATION, [
         user("Cluster Business customers into 4 segments."),
-        tc("t101a", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4}),
+        tc("t101a", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4}),
         tr("t101a", BIZ_4CLUSTER),
         asst(BIZ_4CLUSTER + "\n\nCluster 4 (n=643, avg_num_trxns=1.0, avg_weekly_trxn_amt=783,507.6) is the highest-risk segment by both transaction frequency and weekly volume across all four clusters."),
         user("What threshold should I apply to Cluster 4?"),
@@ -457,7 +457,7 @@ examples = [
     # ex107 — user asks for all clusters (no filter) → no DISPLAY_CLUSTERS line
     ex(SYS_SEGMENTATION, [
         user("Cluster all customers and show the treemap."),
-        tc("t107", "ss_cluster_analysis", {"customer_type": "All", "n_clusters": 4}),
+        tc("t107", "ds_cluster_analysis", {"customer_type": "All", "n_clusters": 4}),
         tr("t107", """\
 Segment: All | Active accounts: 212,608 (878,207 excluded with no transactions)
 Clusters: 4 | Features: 6 numeric + 10 encoded categorical
@@ -485,7 +485,7 @@ Cluster 1 has the highest avg_weekly_trxn_amt (905,773.0) and avg_num_trxns (1.1
     # ex108 — user asks for highest risk cluster → DISPLAY_CLUSTERS silently
     ex(SYS_SEGMENTATION, [
         user("Show me only the highest risk Business cluster."),
-        tc("t108", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4}),
+        tc("t108", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4}),
         tr("t108", BIZ_4CLUSTER),
         asst(BIZ_4CLUSTER + "\n\nCluster 4 (avg_num_trxns=1.0, avg_weekly_trxn_amt=783,507.6) has the highest transaction activity of all four Business clusters.\nDISPLAY_CLUSTERS: 4"),
     ]),
@@ -493,7 +493,7 @@ Cluster 1 has the highest avg_weekly_trxn_amt (905,773.0) and avg_num_trxns (1.1
     # ex109 — user asks for top 2 high risk → DISPLAY_CLUSTERS silently
     ex(SYS_SEGMENTATION, [
         user("Show the top 2 highest-risk Individual clusters."),
-        tc("t109", "ss_cluster_analysis", {"customer_type": "Individual", "n_clusters": 4}),
+        tc("t109", "ds_cluster_analysis", {"customer_type": "Individual", "n_clusters": 4}),
         tr("t109", IND_4CLUSTER),
         asst(IND_4CLUSTER + "\n\nClusters 3 and 1 have the highest transaction frequency and weekly volume among all four Individual clusters.\nDISPLAY_CLUSTERS: 3,1"),
     ]),

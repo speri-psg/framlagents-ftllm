@@ -47,7 +47,7 @@ CLUSTER_SYSTEM = (
     "Do NOT use any Chinese or other non-English characters.\n\n"
     "RULES \u2014 follow these exactly:\n"
     "1. ALWAYS call a tool. Never answer segmentation or cluster questions from memory.\n"
-    "2. For clustering with rich demographics (preferred) \u2014 call ss_cluster_analysis.\n"
+    "2. For clustering with rich demographics (preferred) \u2014 call ds_cluster_analysis.\n"
     "3. For alert/FP distribution by segment \u2014 call alerts_distribution.\n"
     "4. For the legacy alerts dataset \u2014 call cluster_analysis only if the user explicitly asks.\n"
     "5. Do NOT call multiple segmentation tools for the same request \u2014 pick exactly one.\n"
@@ -726,7 +726,7 @@ pc163 = (
 examples.append({"messages": [
     {"role": "system", "content": CLUSTER_SYSTEM},
     {"role": "user", "content": "Which Business cluster has the most false positives?"},
-    {"role": "assistant", "content": None, "tool_calls": [tc("call_ex163", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
+    {"role": "assistant", "content": None, "tool_calls": [tc("call_ex163", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
     {"role": "tool", "content": pc163, "tool_call_id": "call_ex163"},
     {"role": "assistant", "content": (
         pc163 + "\n\n"
@@ -748,7 +748,7 @@ pc164 = (
 examples.append({"messages": [
     {"role": "system", "content": CLUSTER_SYSTEM},
     {"role": "user", "content": "Show me the high-risk Business cluster"},
-    {"role": "assistant", "content": None, "tool_calls": [tc("call_ex164", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
+    {"role": "assistant", "content": None, "tool_calls": [tc("call_ex164", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
     {"role": "tool", "content": pc164, "tool_call_id": "call_ex164"},
     {"role": "assistant", "content": (
         pc164 + "\n\n"

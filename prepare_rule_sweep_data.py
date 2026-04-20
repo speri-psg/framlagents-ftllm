@@ -578,7 +578,7 @@ print("\nCombining and joining SAR labels …")
 
 combined = pd.concat(results, ignore_index=True, sort=False)
 combined = combined.merge(
-    sar[["customer_id", "is_sar", "smart_segment_id", "customer_type"]],
+    sar[["customer_id", "is_sar", "dynamic_segment", "customer_type"]],
     on="customer_id",
     how="left",
 )

@@ -51,7 +51,7 @@ CLUSTER_SYSTEM = (
     "unsupervised K-Means clustering and explain their AML risk profiles. IMPORTANT: You MUST respond entirely in English.\n\n"
     "RULES \u2014 follow these exactly:\n"
     "1. ALWAYS call a tool. Never answer segmentation or cluster questions from memory.\n"
-    "2. For clustering with rich demographics (preferred) \u2014 call ss_cluster_analysis.\n"
+    "2. For clustering with rich demographics (preferred) \u2014 call ds_cluster_analysis.\n"
     "3. For alert/FP distribution by segment \u2014 call alerts_distribution.\n"
     "4. customer_type must be exactly one of: Business, Individual, All. Default to All if not specified.\n"
     "5. n_clusters must be an integer 2-8. Default is 4.\n"
@@ -663,11 +663,11 @@ examples.append({"messages": [
 # These are segmentation agent examples
 # ==============================
 
-# ex321 — "Which cluster of Business customers has highest transaction volume?" → ss_cluster_analysis
+# ex321 — "Which cluster of Business customers has highest transaction volume?" → ds_cluster_analysis
 examples.append({"messages": [
     {"role": "system", "content": CLUSTER_SYSTEM},
     {"role": "user", "content": "Which cluster of Business customers has the highest transaction volume?"},
-    {"role": "assistant", "content": None, "tool_calls": [tc("call_ex321", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
+    {"role": "assistant", "content": None, "tool_calls": [tc("call_ex321", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
     {"role": "tool", "content": pc_cluster_biz, "tool_call_id": "call_ex321"},
     {"role": "assistant", "content": (
         pc_cluster_biz + "\n\n"
@@ -675,11 +675,11 @@ examples.append({"messages": [
     )}
 ]})
 
-# ex322 — "Show Business customer clusters by transaction behavior" → ss_cluster_analysis
+# ex322 — "Show Business customer clusters by transaction behavior" → ds_cluster_analysis
 examples.append({"messages": [
     {"role": "system", "content": CLUSTER_SYSTEM},
     {"role": "user", "content": "Show Business customer clusters by transaction behavior"},
-    {"role": "assistant", "content": None, "tool_calls": [tc("call_ex322", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
+    {"role": "assistant", "content": None, "tool_calls": [tc("call_ex322", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
     {"role": "tool", "content": pc_cluster_biz, "tool_call_id": "call_ex322"},
     {"role": "assistant", "content": (
         pc_cluster_biz + "\n\n"
@@ -687,11 +687,11 @@ examples.append({"messages": [
     )}
 ]})
 
-# ex323 — "Which Business cluster has the most activity?" → ss_cluster_analysis
+# ex323 — "Which Business cluster has the most activity?" → ds_cluster_analysis
 examples.append({"messages": [
     {"role": "system", "content": CLUSTER_SYSTEM},
     {"role": "user", "content": "Which Business cluster has the most transaction activity?"},
-    {"role": "assistant", "content": None, "tool_calls": [tc("call_ex323", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
+    {"role": "assistant", "content": None, "tool_calls": [tc("call_ex323", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
     {"role": "tool", "content": pc_cluster_biz, "tool_call_id": "call_ex323"},
     {"role": "assistant", "content": (
         pc_cluster_biz + "\n\n"

@@ -1,6 +1,6 @@
 """
 build_alerts_csv.py — Rebuild docs/custs_accts_txns_alerts.csv from:
-  - docs/ss_segmentation_data.csv  (transaction features for all customers)
+  - docs/ds_segmentation_data.csv  (transaction features for all customers)
   - docs/sar_simulation.csv        (which customers were alerted / filed SARs)
 
 Output schema matches the original file so application.py needs no changes.
@@ -19,25 +19,25 @@ import os
 import pandas as pd
 
 _HERE    = os.path.dirname(os.path.abspath(__file__))
-SEG_PATH = os.path.join(_HERE, "docs", "ss_segmentation_data.csv")
+SEG_PATH = os.path.join(_HERE, "docs", "ds_segmentation_data.csv")
 SAR_PATH = os.path.join(_HERE, "docs", "sar_simulation.csv")
 OUT_PATH = os.path.join(_HERE, "docs", "custs_accts_txns_alerts.csv")
 
 # ── Load ──────────────────────────────────────────────────────────────────────
-print("Loading ss_segmentation_data.csv ...")
+print("Loading ds_segmentation_data.csv ...")
 seg = pd.read_csv(SEG_PATH, low_memory=False)
 
 print("Loading sar_simulation.csv ...")
 sar = pd.read_csv(SAR_PATH, usecols=["customer_id", "is_sar"])
 
 # ── Join: keep only alerted customers, one row per customer ──────────────────
-# ss_segmentation_data has one row per account — deduplicate to one row per
+# ds_segmentation_data has one row per account — deduplicate to one row per
 # customer (keep row with highest avg_num_trxns as most representative account)
 seg_dedup = (
     seg.sort_values("avg_num_trxns", ascending=False)
        .drop_duplicates(subset="customer_id", keep="first")
 )
-print(f"ss_segmentation_data: {len(seg):,} rows -> {len(seg_dedup):,} unique customers")
+print(f"ds_segmentation_data: {len(seg):,} rows -> {len(seg_dedup):,} unique customers")
 
 df = seg_dedup.merge(sar, on="customer_id", how="inner")
 print(f"Alerted customers joined: {len(df):,}")
@@ -59,7 +59,7 @@ out["OPEN_DATE"]           = df.get("open_date", pd.Series("", index=df.index))
 out["ACCT_AGE_YEARS"]      = df["ACCT_AGE_YEARS"]
 out["CURRENT_BALANCE"]     = df["CURRENT_BALANCE"]
 out["CUSTOMER_ID"]         = df["customer_id"]
-out["STATE"]               = ""   # not available in ss_segmentation_data
+out["STATE"]               = ""   # not available in ds_segmentation_data
 out["COUNTRY"]             = df["RESIDENCY_COUNTRY"]
 out["BIRTH_DATE"]          = ""   # not available
 out["AGE"]                 = df["AGE"]
@@ -91,6 +91,6 @@ print(f"\nSaved {len(out):,} rows to {OUT_PATH}")
 print(f"\nALERT=Yes: {(out['ALERT']=='Yes').sum():,}")
 print(f"FP=Yes:    {(out['FP']=='Yes').sum():,}  (non-SAR alerted)")
 print(f"FN=Yes:    {(out['FN']=='Yes').sum():,}  (SAR alerted — missed when threshold raised)")
-print(f"smart_segment_id check:")
-print(f"  INDIVIDUAL (id=1): {(df['smart_segment_id']==1).sum():,}")
-print(f"  BUSINESS   (id=0): {(df['smart_segment_id']==0).sum():,}")
+print(f"dynamic_segment check:")
+print(f"  INDIVIDUAL (id=1): {(df['dynamic_segment']==1).sum():,}")
+print(f"  BUSINESS   (id=0): {(df['dynamic_segment']==0).sum():,}")

@@ -1,7 +1,7 @@
 """
 rebuild_pipeline.py — Full rebuild pipeline:
 
-  Step 1: Aggregate ss_segmentation_data.csv at the customer level
+  Step 1: Aggregate ds_segmentation_data.csv at the customer level
           (sum transaction metrics across all accounts — a customer with
           5 accounts contributes combined metrics to their risk profile)
 
@@ -32,7 +32,7 @@ SAR_RATE     = 0.10    # ~10% SAR rate among alerted customers
 FN_TARGET    = 200     # non-alerted truly suspicious customers to add
 
 _HERE        = os.path.dirname(os.path.abspath(__file__))
-SEG_PATH     = os.path.join(_HERE, "docs", "ss_segmentation_data.csv")
+SEG_PATH     = os.path.join(_HERE, "docs", "ds_segmentation_data.csv")
 SAR_OUT      = os.path.join(_HERE, "docs", "sar_simulation.csv")
 ALERTS_OUT   = os.path.join(_HERE, "docs", "custs_accts_txns_alerts.csv")
 PSG_ALERTS   = "C:/Users/Aaditya/Downloads/PSG_Alert_Report_env2_Nov3_PSG_Alerts_11112025.csv"
@@ -56,10 +56,10 @@ def sar_score(df):
     return expit(z)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 1 — Aggregate ss_segmentation_data at customer level
+# STEP 1 — Aggregate ds_segmentation_data at customer level
 # ─────────────────────────────────────────────────────────────────────────────
 print("=" * 60)
-print("STEP 1: Aggregating ss_segmentation_data at customer level")
+print("STEP 1: Aggregating ds_segmentation_data at customer level")
 print("=" * 60)
 
 seg = pd.read_csv(SEG_PATH, low_memory=False)
@@ -76,7 +76,7 @@ FIRST_COLS = ["AGE", "GENDER", "marital_status", "occupation", "CITIZENSHIP",
               "INCOME", "nationality_country_id", "RESIDENCY_COUNTRY",
               "pep", "314b", "negative_news", "OFAC", "exempt_cdd",
               "exempt_sanctions", "naics", "sic_code", "entity",
-              "customer_type", "smart_segment_id",
+              "customer_type", "dynamic_segment",
               "AGE_CATEGORY", "INCOME_BAND", "INCOME_BAND",
               # Take primary account info from highest-balance account
               "ACCOUNT_TYPE", "product_name", "status", "ACCOUNT_AGE_CATEGORY"]
@@ -145,7 +145,7 @@ print(f"  Unique alerted customers: {len(alert_agg):,}")
 
 # Join alert aggregates to customer-level seg data
 alerted = alert_agg.merge(
-    cust_agg[["customer_id", "customer_type", "smart_segment_id",
+    cust_agg[["customer_id", "customer_type", "dynamic_segment",
               "avg_num_trxns", "avg_weekly_trxn_amt", "trxn_amt_monthly",
               "total_trxn_amt", "cashout_count"]],
     on="customer_id", how="left"
@@ -211,7 +211,7 @@ print("=" * 60)
 print("STEP 4: Saving sar_simulation.csv")
 print("=" * 60)
 
-SAR_COLS = ["customer_id", "customer_type", "smart_segment_id",
+SAR_COLS = ["customer_id", "customer_type", "dynamic_segment",
             "alert_count", "total_alert_amt", "max_alert_amt",
             "avg_num_trxns", "avg_weekly_trxn_amt", "trxn_amt_monthly",
             "sar_score", "is_sar", "source"]
@@ -241,7 +241,7 @@ all_subjects = sar_final.merge(
         "CURRENT_BALANCE", "AGE", "AGE_CATEGORY", "GENDER", "CITIZENSHIP",
         "RESIDENCY_COUNTRY", "occupation", "INCOME", "naics",
         "nationality_country_id", "negative_news", "OFAC", "314b",
-        "customer_type", "smart_segment_id", "INCOME_BAND",
+        "customer_type", "dynamic_segment", "INCOME_BAND",
         "avg_num_trxns", "avg_weekly_trxn_amt", "trxn_amt_monthly",
         "account_count",
     ]],
@@ -249,7 +249,7 @@ all_subjects = sar_final.merge(
 )
 
 # Resolve any duplicate column names from the merge
-for col in ["customer_type", "smart_segment_id", "avg_num_trxns",
+for col in ["customer_type", "dynamic_segment", "avg_num_trxns",
             "avg_weekly_trxn_amt", "trxn_amt_monthly"]:
     sar_col = col + "_sar"
     if sar_col in all_subjects.columns:

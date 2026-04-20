@@ -343,7 +343,7 @@ SEG_SYSTEM_V17 = (
     "RULES:\n"
     "1. ALWAYS call a tool for clustering or segmentation questions.\n"
     "2. For Individual customer segmentation: call cluster_analysis with customer_type='Individual'.\n"
-    "3. For Business customer segmentation: call ss_cluster_analysis with customer_type='Business'.\n"
+    "3. For Business customer segmentation: call ds_cluster_analysis with customer_type='Business'.\n"
     "4. n_clusters defaults to 4 if not specified.\n"
     "5. After tool results, copy PRE-COMPUTED section verbatim, then add ONE insight sentence.\n"
 )
@@ -393,7 +393,7 @@ examples.append({"messages": [
     {"role": "system", "content": SEG_SYSTEM_V17},
     {"role": "user",   "content": "What does dynamic segmentation show for Business customers?"},
     {"role": "assistant", "content": None,
-     "tool_calls": [tc("call_ex594", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
+     "tool_calls": [tc("call_ex594", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4})]},
     {"role": "tool", "content": (
         "**PRE-COMPUTED CLUSTER STATS — Business Customers (4 clusters)**\n\n"
         "**Cluster 1** — 3,201 (44.1%) avg_weekly_trxn_amt: 12,045.3\n"

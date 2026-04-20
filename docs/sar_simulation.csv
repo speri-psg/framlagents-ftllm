@@ -1,4 +1,4 @@
-customer_id,customer_type,smart_segment_id,alert_count,rule_count,max_trigger,max_z_score,avg_num_trxns,avg_weekly_trxn_amt,trxn_amt_monthly,total_trxn_amt,cashout_count,sar_score,is_sar
+customer_id,customer_type,dynamic_segment,alert_count,rule_count,max_trigger,max_z_score,avg_num_trxns,avg_weekly_trxn_amt,trxn_amt_monthly,total_trxn_amt,cashout_count,sar_score,is_sar
 000a3e6b-d732-4967-aab8-af5d2c1f8980,INDIVIDUAL,1,1,1,3913749.0,11.009,0.0,16736.65,795206.0333333332,0.0,0.0,0.9925230608510128,0
 002a9162-b386-4857-9d2c-b919190d9db5,INDIVIDUAL,1,1,1,2317501.0,56.682,0.0,30783.87,798336.0,0.0,0.0,0.9999824366394867,1
 00305a26-d504-456b-81f4-79b1b61a433a,INDIVIDUAL,1,1,1,2618510.0,7.89,0.0,2343.0,721902.3857142858,0.0,0.0,0.9670811599730129,0

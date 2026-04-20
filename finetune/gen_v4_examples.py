@@ -58,7 +58,7 @@ SYS_SEGMENTATION = (
     "Do NOT use any Chinese or other non-English characters.\n\n"
     "RULES — follow these exactly:\n"
     "1. ALWAYS call a tool. Never answer segmentation or cluster questions from memory.\n"
-    "2. For clustering with rich demographics (preferred) — call ss_cluster_analysis.\n"
+    "2. For clustering with rich demographics (preferred) — call ds_cluster_analysis.\n"
     "3. For alert/FP distribution by segment — call alerts_distribution.\n"
     "4. For the legacy alerts dataset — call cluster_analysis only if the user explicitly asks.\n"
     "5. Do NOT call multiple segmentation tools for the same request — pick exactly one.\n"
@@ -371,7 +371,7 @@ examples = [
     # ex48 — Gaps 28/29/30: cluster correct stats, no fabricated numbers, no invented thresholds
     ex(SYS_SEGMENTATION, [
         {"role": "user", "content": "Cluster business into 4 segments and show the highest risk segment."},
-        tool_call("call_v4_ex08", "ss_cluster_analysis", {"customer_type": "Business", "n_clusters": 4}),
+        tool_call("call_v4_ex08", "ds_cluster_analysis", {"customer_type": "Business", "n_clusters": 4}),
         tool_result("call_v4_ex08", BIZ_4CLUSTER),
         {"role": "assistant", "content": (
             "K-Means clustering on **Business** customers with **4** clusters covers 14,423 active accounts. "
@@ -393,7 +393,7 @@ examples = [
     # ex49 — Gaps 28/29: cluster interpretation with correct numbers, no fabricated thresholds (Individual)
     ex(SYS_SEGMENTATION, [
         {"role": "user", "content": "Show me the 4 Individual clusters and which has the lowest risk."},
-        tool_call("call_v4_ex09", "ss_cluster_analysis", {"customer_type": "Individual", "n_clusters": 4}),
+        tool_call("call_v4_ex09", "ds_cluster_analysis", {"customer_type": "Individual", "n_clusters": 4}),
         tool_result("call_v4_ex09", """\
 Segment: Individual | Active accounts: 38,104 (194 with no transactions)
 Clusters: 4 | Features: 7 numeric + 12 encoded categorical

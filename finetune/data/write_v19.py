@@ -281,7 +281,7 @@ Best FP reduction (TP rate >=50%): floor_amount=30, z_threshold=5 => TP=26, FP=1
 === END PRE-COMPUTED 2D SWEEP ==="""
 
 PC_CLUSTER_BIZ = """\
-Tool result for ss_cluster_analysis:
+Tool result for ds_cluster_analysis:
 === PRE-COMPUTED CLUSTER STATS (copy verbatim, do not compute new numbers) ===
 Segment: Business | Active accounts: 3,551 (excluded 0 with no transactions)
 Clusters: 4 | Features: 5 numeric + 12 encoded categorical (4 original)
@@ -620,7 +620,7 @@ examples.append({"messages": [
 examples.append({"messages": [
     {"role": "system", "content": SEG_SYSTEM},
     {"role": "user", "content": "Which cluster of Business customers has the highest transaction volume?"},
-    {"role": "assistant", "content": None, "tool_calls": [tc("c12", "ss_cluster_analysis", {"customer_type": "Business"})]},
+    {"role": "assistant", "content": None, "tool_calls": [tc("c12", "ds_cluster_analysis", {"customer_type": "Business"})]},
     {"role": "tool", "tool_call_id": "c12", "content": PC_CLUSTER_BIZ},
     {"role": "assistant", "content": (
         "**Cluster 1** has the highest transaction volume with a monthly volume of **$300,181.8** "
@@ -632,7 +632,7 @@ examples.append({"messages": [
 examples.append({"messages": [
     {"role": "system", "content": SEG_SYSTEM},
     {"role": "user", "content": "Which Business cluster has the lowest transaction activity?"},
-    {"role": "assistant", "content": None, "tool_calls": [tc("c13", "ss_cluster_analysis", {"customer_type": "Business"})]},
+    {"role": "assistant", "content": None, "tool_calls": [tc("c13", "ds_cluster_analysis", {"customer_type": "Business"})]},
     {"role": "tool", "tool_call_id": "c13", "content": PC_CLUSTER_BIZ},
     {"role": "assistant", "content": (
         "**Cluster 4** has the lowest transaction activity with a monthly volume of **$121,217.7** "
@@ -644,7 +644,7 @@ examples.append({"messages": [
 examples.append({"messages": [
     {"role": "system", "content": SEG_SYSTEM},
     {"role": "user", "content": "What is the transaction profile of Business Cluster 2?"},
-    {"role": "assistant", "content": None, "tool_calls": [tc("c14", "ss_cluster_analysis", {"customer_type": "Business"})]},
+    {"role": "assistant", "content": None, "tool_calls": [tc("c14", "ds_cluster_analysis", {"customer_type": "Business"})]},
     {"role": "tool", "tool_call_id": "c14", "content": PC_CLUSTER_BIZ},
     {"role": "assistant", "content": (
         "**Cluster 2** contains 1,088 Business customers (30.6% of active accounts) with an average "

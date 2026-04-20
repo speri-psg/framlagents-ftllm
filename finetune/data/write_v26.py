@@ -80,14 +80,14 @@ SEG_SYSTEM = (
     "You identify natural customer behavioral segments using unsupervised K-Means clustering. "
     "IMPORTANT: You MUST respond entirely in English.\n\n"
     "RULES — follow these exactly:\n"
-    "1. For clustering or segmentation requests: call ss_cluster_analysis immediately.\n"
+    "1. For clustering or segmentation requests: call ds_cluster_analysis immediately.\n"
     "2. For alert/FP distribution by segment: call alerts_distribution.\n"
     "3. Do NOT answer segmentation questions from memory — always call the tool.\n"
     "4. After receiving tool results, copy the PRE-COMPUTED section verbatim.\n"
     "5. Add ONE sentence of insight using ONLY numbers from the tool result.\n"
     "6. Call the tool ONCE only.\n"
-    "7. The clustering tool is named ss_cluster_analysis — not segment_customers, "
-    "not segmentation_kmeans, not cluster_customers. Use exactly: ss_cluster_analysis.\n"
+    "7. The clustering tool is named ds_cluster_analysis — not segment_customers, "
+    "not segmentation_kmeans, not cluster_customers. Use exactly: ds_cluster_analysis.\n"
 )
 
 THRESHOLD_SYSTEM = (
@@ -206,7 +206,7 @@ At the highest value (200000.00): TP=11, FP=34, FN=30, TN=237 (TP rate=26.8%, pr
 === END PRE-COMPUTED SAR BACKTEST ==="""
 
 PC_CLUSTER_BIZ = """\
-Tool result for ss_cluster_analysis:
+Tool result for ds_cluster_analysis:
 === PRE-COMPUTED CLUSTER STATS (copy verbatim, do not compute new numbers) ===
 Segment: Business | Active accounts: 3,551 (excluded 0 with no transactions)
 Clusters: 4 | Features: 5 numeric + 12 encoded categorical (4 original)
@@ -426,7 +426,7 @@ examples.append({"messages": [
     {"role": "system", "content": SEG_SYSTEM},
     {"role": "user", "content": "Cluster Business customers by transaction behavior"},
     {"role": "assistant", "content": None, "tool_calls": [
-        tc("g7", "ss_cluster_analysis", {"customer_type": "Business"})
+        tc("g7", "ds_cluster_analysis", {"customer_type": "Business"})
     ]},
     {"role": "tool", "tool_call_id": "g7", "content": PC_CLUSTER_BIZ},
     {"role": "assistant", "content": (
@@ -447,7 +447,7 @@ examples.append({"messages": [
     {"role": "system", "content": SEG_SYSTEM},
     {"role": "user", "content": "Which Business cluster has the highest transaction volume?"},
     {"role": "assistant", "content": None, "tool_calls": [
-        tc("g8", "ss_cluster_analysis", {"customer_type": "Business"})
+        tc("g8", "ds_cluster_analysis", {"customer_type": "Business"})
     ]},
     {"role": "tool", "tool_call_id": "g8", "content": PC_CLUSTER_BIZ},
     {"role": "assistant", "content": (

@@ -343,7 +343,7 @@ def segment_stats_figure(df):
 
     rows = []
     for seg_id, name in [(0, "Business"), (1, "Individual")]:
-        seg      = df[df["smart_segment_id"] == seg_id]
+        seg      = df[df["dynamic_segment"] == seg_id]
         n        = len(seg)
         alerts   = int(seg["alerts"].sum())
         fp       = int(seg["false_positives"].sum())

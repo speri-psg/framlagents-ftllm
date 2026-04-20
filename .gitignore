@@ -29,3 +29,5 @@ finetune/outputs/
 
 # Misc
 Segment_Business_avg_num_trxns.csv
+docs/ds_segmentation_data.csv
+docs/ss_segmentation_data.csv

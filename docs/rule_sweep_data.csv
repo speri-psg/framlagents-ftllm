@@ -1,4 +1,4 @@
-customer_id,risk_factor,trigger_amt,profile_mean,profile_std,z_score,age,pair_total,in_amt,out_amt,ratio,max_rolling_3d,max_rolling_5d,max_rolling_7d,max_rolling_10d,max_rolling_14d,days_observed,days_required,time_window,daily_floor,daily_ceiling,txn_count,floor_current,is_sar,smart_segment_id,customer_type
+customer_id,risk_factor,trigger_amt,profile_mean,profile_std,z_score,age,pair_total,in_amt,out_amt,ratio,max_rolling_3d,max_rolling_5d,max_rolling_7d,max_rolling_10d,max_rolling_14d,days_observed,days_required,time_window,daily_floor,daily_ceiling,txn_count,floor_current,is_sar,dynamic_segment,customer_type
 03091056-f3d8-41f4-b2e9-83218b11445c,Activity Deviation (ACH),7802202.0,1551662.0,0.0,,,,,,,,,,,,,,,,,,,0,1,INDIVIDUAL
 c2bdf08b-84e3-4f7b-8ee1-a72c3c7c8432,Activity Deviation (ACH),7774894.0,489786.5,192509.51,37.843,,,,,,,,,,,,,,,,,,1,1,INDIVIDUAL
 3c553006-3e57-41d8-87a4-d04ecf1da7a1,Activity Deviation (ACH),7774894.0,489786.5,192509.51,37.843,,,,,,,,,,,,,,,,,,1,1,INDIVIDUAL

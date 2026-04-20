@@ -6,7 +6,7 @@ Approach:
      authoritative alerted-customer population — these are the customers
      identified from condition_details, covering all 11 AML rules.
   2. Aggregate per customer: max trigger_amt, max z_score, alert_count, etc.
-  3. Join to ss_segmentation_data for smart_segment_id, customer_type,
+  3. Join to ds_segmentation_data for dynamic_segment, customer_type,
      and additional profile features.
   4. Compute a SAR score via logistic function over alert features + noise.
   5. Threshold to hit ~10% SAR filing rate (realistic for AML programs).
@@ -29,13 +29,13 @@ SAR_RATE     = 0.10   # target ~10% of alerted customers flagged as SAR
 _HERE        = os.path.dirname(__file__)
 SS_DIR       = os.path.join(_HERE, "ss_files")
 SWEEP_PATH   = os.path.join(_HERE, "docs", "rule_sweep_data.csv")
-SEG_PATH     = os.path.join(_HERE, "docs", "ss_segmentation_data.csv")
+SEG_PATH     = os.path.join(_HERE, "docs", "ds_segmentation_data.csv")
 TXNS_PATH    = os.path.join(SS_DIR, "aml_s_transactions.csv")
 ACCT_PATH    = os.path.join(SS_DIR, "aml_s_account_relationship.csv")
 OUT_PATH     = os.path.join(_HERE, "docs", "sar_simulation.csv")
 
 SEG_COLS = [
-    "customer_id", "customer_type", "smart_segment_id",
+    "customer_id", "customer_type", "dynamic_segment",
     "avg_num_trxns", "avg_weekly_trxn_amt", "trxn_amt_monthly",
     "total_trxn_amt", "cashout_count",
 ]
@@ -71,7 +71,7 @@ seg_cust = (
     .groupby("customer_id", as_index=False)
     .agg(
         customer_type    = ("customer_type",        "first"),
-        smart_segment_id = ("smart_segment_id",     "first"),
+        dynamic_segment = ("dynamic_segment",     "first"),
         avg_num_trxns    = ("avg_num_trxns",         "first"),
         avg_weekly_trxn_amt = ("avg_weekly_trxn_amt","first"),
         trxn_amt_monthly = ("trxn_amt_monthly",     "first"),
@@ -89,7 +89,7 @@ print(f"  BUSINESS:   {(cust['customer_type']=='BUSINESS').sum()}")
 print(f"  Unmatched:  {(cust['customer_type'].isna()).sum()}")
 
 # ── 3b. Fill zero/null trxn_amt_monthly from actual transaction data ──────────
-# ss_segmentation_data has many zeros for alerted customers; compute the true
+# ds_segmentation_data has many zeros for alerted customers; compute the true
 # average monthly transaction total per customer from aml_s_transactions.
 zeros_before = int((cust["trxn_amt_monthly"].fillna(0) == 0).sum())
 print(f"\ntrxn_amt_monthly zeros/nulls before fix: {zeros_before} / {len(cust)}")
@@ -178,7 +178,7 @@ print(cust.groupby("customer_type")["is_sar"].agg(["sum","count","mean"]).round(
 
 # ── 6. Save ───────────────────────────────────────────────────────────────────
 out_cols = [
-    "customer_id", "customer_type", "smart_segment_id",
+    "customer_id", "customer_type", "dynamic_segment",
     "alert_count", "rule_count", "max_trigger", "max_z_score",
     "avg_num_trxns", "avg_weekly_trxn_amt", "trxn_amt_monthly",
     "total_trxn_amt", "cashout_count",

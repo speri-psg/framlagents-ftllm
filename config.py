@@ -28,7 +28,7 @@ MAX_TOOL_CALLS    = int(os.getenv("MAX_TOOL_CALLS",    "6"))      # max agentic 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
 ALERTS_CSV          = os.path.join(_HERE, "docs", "custs_accts_txns_alerts.csv")
-SS_CSV              = os.path.join(_HERE, "docs", "ss_segmentation_data.csv")
+SS_CSV              = os.path.join(_HERE, "docs", "ds_segmentation_data.csv")
 SAR_CSV             = os.path.join(_HERE, "docs", "sar_simulation.csv")
 CLUSTER_LABELS_CSV  = os.path.join(_HERE, "docs", "customer_cluster_labels.csv")
 SS_FILES_DIR        = os.path.join(_HERE, "ss_files")
