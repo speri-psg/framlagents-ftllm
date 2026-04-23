@@ -24,7 +24,15 @@ TOOLS = [
                     "threshold_column": {
                         "type": "string",
                         "enum": ["AVG_TRXNS_WEEK", "AVG_TRXN_AMT", "TRXN_AMT_MONTHLY"],
-                        "description": "Column to sweep as the alert threshold.",
+                        "description": (
+                            "Column to sweep as the alert threshold. "
+                            "AVG_TRXNS_WEEK = average NUMBER of transactions per week (a count, not a dollar amount). "
+                            "AVG_TRXN_AMT = average DOLLAR AMOUNT per transaction. "
+                            "TRXN_AMT_MONTHLY = average total monthly transaction DOLLAR VOLUME. "
+                            "Use AVG_TRXN_AMT when the user says 'transaction amount', 'average amount', or 'dollar amount'. "
+                            "Use AVG_TRXNS_WEEK when the user says 'transaction count', 'number of transactions', or 'frequency'. "
+                            "Use TRXN_AMT_MONTHLY when the user says 'monthly amount' or 'monthly volume'."
+                        ),
                     },
                 },
                 "required": ["segment", "threshold_column"],
@@ -63,7 +71,15 @@ TOOLS = [
                     "threshold_column": {
                         "type": "string",
                         "enum": ["AVG_TRXNS_WEEK", "AVG_TRXN_AMT", "TRXN_AMT_MONTHLY"],
-                        "description": "Column to sweep as the alert threshold.",
+                        "description": (
+                            "Column to sweep as the alert threshold. "
+                            "AVG_TRXNS_WEEK = average NUMBER of transactions per week (a count, not a dollar amount). "
+                            "AVG_TRXN_AMT = average DOLLAR AMOUNT per transaction. "
+                            "TRXN_AMT_MONTHLY = average total monthly transaction DOLLAR VOLUME. "
+                            "Use AVG_TRXN_AMT when the user says 'transaction amount', 'average amount', or 'dollar amount'. "
+                            "Use AVG_TRXNS_WEEK when the user says 'transaction count', 'number of transactions', or 'frequency'. "
+                            "Use TRXN_AMT_MONTHLY when the user says 'monthly amount' or 'monthly volume'."
+                        ),
                     },
                 },
                 "required": ["segment", "threshold_column"],
@@ -122,10 +138,10 @@ TOOLS = [
         "function": {
             "name": "list_rules",
             "description": (
-                "List all available AML detection rules (by short code) with their SAR count, "
-                "false positive count, and precision. Call this first when the user asks about "
-                "rule-level SAR analysis, rule performance, which rules generate the most FPs, "
-                "or before calling rule_sar_backtest if the user hasn't specified a rule code."
+                "List all available AML detection rules with their SAR count, "
+                "false positive count, and precision. Use this when the user asks which rules "
+                "exist, which rules generate the most FPs, a rule performance overview, "
+                "or when no specific rule name is given."
             ),
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
@@ -135,12 +151,12 @@ TOOLS = [
         "function": {
             "name": "rule_sar_backtest",
             "description": (
-                "For a specific AML detection rule, sweep a customer profile threshold and show "
-                "how many SAR customers are caught vs. missed and how many false positives remain "
-                "at each threshold level. Use this when the user asks about a specific rule's "
-                "SAR performance, rule-level FP/FN analysis, or wants to see if a profile filter "
-                "can reduce FPs for a particular rule. Call list_rules first if you don't know "
-                "the rule code."
+                "For a specific named AML rule, sweep a rule condition parameter and show "
+                "how many SAR customers are caught vs. missed at each threshold level. "
+                "Use this when the user names a specific rule (e.g. 'Elder Abuse', "
+                "'Velocity Single', 'Activity Deviation ACH', 'CTR Client', 'Detect Excessive') "
+                "and asks about its SAR filing rate, SAR catch rate, SAR detection rate, "
+                "SAR backtest, or rule-level FP/FN performance."
             ),
             "parameters": {
                 "type": "object",
@@ -201,7 +217,7 @@ RULES — follow these exactly:
 1. ALWAYS call a tool. Never answer threshold or alert questions from memory. EXCEPTION: if the user provides invalid parameters (threshold_min, threshold_max, threshold_step, step, min_threshold), do NOT call any tool — follow Rule 14 instead.
 2. For any question about FP, FN, threshold, alert rates, or transactions — call threshold_tuning.
 3. For general segment counts or totals — call segment_stats.
-4. For any question about SAR catch rate, SAR detection rate, SAR filing rate, what percentage of customers are SARs, or SAR backtest — call sar_backtest.
+4. For general SAR catch rate or SAR filing rate by SEGMENT (Business, Individual) with no specific rule named — call sar_backtest. If the user names a specific rule (e.g. "Elder Abuse", "Velocity Single", "CTR Client") — use rule_sar_backtest instead (see Rule 15).
 5. threshold_column must be exactly one of: AVG_TRXNS_WEEK, AVG_TRXN_AMT, TRXN_AMT_MONTHLY
 6. segment must be exactly one of: Business, Individual
 7. If the user does not specify a segment, default to Business.
@@ -219,7 +235,7 @@ RULES — follow these exactly:
 19. When the user asks about a specific behavioral cluster (e.g. "Cluster 3", "cluster 4"), pass the cluster number as an integer to the cluster parameter of rule_sar_backtest or rule_2d_sweep. Do NOT pass cluster to threshold_tuning, sar_backtest, or segment_stats — those tools do not accept a cluster parameter.
 20. ONE insight sentence only. Do NOT add a second sentence or parenthetical. Do NOT describe heatmap positions (e.g. "top-left", "highest density"). Do NOT say "zero false positives" or "zero FNs" if the PRE-COMPUTED shows FP > 0 or FN > 0.
 21. If the user asks about "highest FP rate" or "worst precision" — they mean precision=0.0%, NOT the highest raw FP count. Rules with SAR=0 and precision=0.0% have the highest FP rate. Name those rules specifically.
-22. The system contains exactly 11 AML rules. Never state a different count.
+22. The system contains exactly 16 AML rules. Never state a different count.
 23. After calling list_rules, if the user asked about a rule by a name that does not appear in the list (e.g. "layering", "smurfing") — state that no rule by that name exists and list the 11 available rules. Do NOT guess which rule "covers" the concept.\
 """
 

@@ -23,6 +23,14 @@ TOOLS = [
                         "enum": ["Business", "Individual", "All"],
                         "description": "Which customer segment to cluster.",
                     },
+                    "n_clusters": {
+                        "type": "integer",
+                        "description": (
+                            "Number of K-Means clusters (2–8), or 0 to auto-select via elbow method. "
+                            "Default is 4. Set to exactly the number the user requests "
+                            "(e.g. 'cluster into 3' → n_clusters=3, 'show 2 clusters' → n_clusters=2)."
+                        ),
+                    },
                 },
                 "required": ["customer_type"],
             },
@@ -72,6 +80,16 @@ TOOLS = [
                         "enum": ["Business", "Individual", "All"],
                         "description": "Which customer segment to cluster.",
                     },
+                    "n_clusters": {
+                        "type": "integer",
+                        "description": (
+                            "Number of K-Means clusters (2–8), or 0 to auto-select via elbow method. "
+                            "Default is 4. Set to exactly the number the user requests "
+                            "(e.g. 'cluster into 3' → n_clusters=3, 'show 2 clusters' → n_clusters=2). "
+                            "IMPORTANT: if the user specifies a number, you MUST pass it here. "
+                            "Do NOT use the default 4 when the user has asked for a different count."
+                        ),
+                    },
                 },
                 "required": ["customer_type"],
             },
@@ -93,7 +111,8 @@ RULES — follow these exactly:
 6. customer_type must be exactly one of: Business, Individual, All
    If the user does NOT specify a customer type, default to All.
 7. n_clusters must be an integer 2-8, or 0 to auto-select. Default is 4.
-   If the user says "N clusters" or "into N" (e.g. "cluster into 4"), set n_clusters=N exactly. Do NOT use 0.
+   If the user says "N clusters", "into N", "only N", or "I want N" (e.g. "cluster into 3", "I only want 2 clusters"),
+   set n_clusters=N exactly in the tool call. Do NOT ignore the user's requested count and do NOT default to 4.
 8. If the user asks to prepare or refresh the raw data — call prepare_segmentation_data first.
 9. After receiving tool results, copy the cluster stats verbatim, then add ONE sentence describing the highest-risk cluster based solely on the numbers in the tool result. Do NOT suggest thresholds, dollar cutoffs, or monitoring actions.
 10. If the user asks to show specific clusters (e.g. "show only cluster 3", "highest risk",

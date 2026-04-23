@@ -254,6 +254,16 @@ class TestComputeRuleSarSweep:
         result = compute_rule_sar_sweep(self._df(), "activity deviation (ach)")
         assert "Labeled population" in result or "population" in result.lower()
 
+    def test_sweep_param_as_integer_does_not_crash(self):
+        # Fix: sweep_param must be str()-cast before .replace() — models can pass ints
+        result = compute_rule_sar_sweep(self._df(), "activity deviation (ach)", sweep_param=1)
+        # Should return a valid result (int 1 doesn't match any param name → uses default)
+        assert isinstance(result, str)
+
+    def test_sweep_param_as_float_does_not_crash(self):
+        result = compute_rule_sar_sweep(self._df(), "activity deviation (ach)", sweep_param=3.0)
+        assert isinstance(result, str)
+
 
 # ── compute_rule_2d_sweep ────────────────────────────────────────────────────
 
@@ -305,6 +315,19 @@ class TestComputeRule2dSweep:
         text, grid = compute_rule_2d_sweep(self._df(), "xyz_nonexistent")
         assert "No rule matched" in text
         assert grid is None
+
+    def test_param1_as_integer_does_not_crash(self):
+        # Fix: param1/param2 must be str()-cast before .replace()
+        text, grid = compute_rule_2d_sweep(
+            self._df(), "activity deviation (ach)", param1=1, param2="z_threshold"
+        )
+        assert isinstance(text, str)
+
+    def test_param2_as_integer_does_not_crash(self):
+        text, grid = compute_rule_2d_sweep(
+            self._df(), "activity deviation (ach)", param1="floor_amount", param2=2
+        )
+        assert isinstance(text, str)
 
 
 # ── _sweep_points ────────────────────────────────────────────────────────────

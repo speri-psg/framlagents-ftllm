@@ -136,12 +136,33 @@ class TestToolsDefinition:
         tt = next(t for t in TOOLS if t["function"]["name"] == "threshold_tuning")
         assert "cluster" not in tt["function"]["parameters"]["properties"]
 
+    def test_threshold_tuning_column_description_disambiguates_avg_trxn_amt(self):
+        tt = next(t for t in TOOLS if t["function"]["name"] == "threshold_tuning")
+        desc = tt["function"]["parameters"]["properties"]["threshold_column"]["description"]
+        assert "AVG_TRXN_AMT" in desc
+        assert "transaction amount" in desc.lower() or "dollar amount" in desc.lower()
+
+    def test_threshold_tuning_column_description_disambiguates_avg_trxns_week(self):
+        tt = next(t for t in TOOLS if t["function"]["name"] == "threshold_tuning")
+        desc = tt["function"]["parameters"]["properties"]["threshold_column"]["description"]
+        assert "AVG_TRXNS_WEEK" in desc
+        # Must clarify it's a count (not dollars) to prevent "weekly amount" → wrong column
+        assert "count" in desc.lower() or "number" in desc.lower() or "frequency" in desc.lower()
+
+    def test_sar_backtest_column_description_matches_threshold_tuning(self):
+        # Both tools share the same column disambiguation — verify sar_backtest has it too
+        sb = next(t for t in TOOLS if t["function"]["name"] == "sar_backtest")
+        desc = sb["function"]["parameters"]["properties"]["threshold_column"]["description"]
+        assert "AVG_TRXN_AMT" in desc
+        assert "AVG_TRXNS_WEEK" in desc
+        assert "TRXN_AMT_MONTHLY" in desc
+
 
 # ── System prompt validation ───────────────────────────────────────────────────
 
 class TestSystemPrompt:
-    def test_exactly_11_rules_stated(self):
-        assert "exactly 11 AML rules" in SYSTEM_PROMPT
+    def test_exactly_16_rules_stated(self):
+        assert "exactly 16 AML rules" in SYSTEM_PROMPT
 
     def test_default_segment_is_business(self):
         assert "default to Business" in SYSTEM_PROMPT

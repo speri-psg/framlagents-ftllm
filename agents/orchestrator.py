@@ -89,6 +89,20 @@ Key distinction:
 - "Screen customers against SDN list" → ofac
 - "What is our Iran/North Korea customer exposure?" → ofac
 - "Show comprehensive sanctions hits" → ofac
+- "Show me a 2D grid for Elder Abuse" → threshold  (2D grid = 2D sweep, same tool)
+- "Show 2D analysis for Detect Excessive Transaction Activity" → threshold  (2D analysis = 2D sweep)
+- "Run a 2D grid analysis for Velocity Single" → threshold
+- "Show grid analysis for Activity Deviation ACH" → threshold
+- "What are Canada's suspicious transaction reporting requirements?" → policy
+- "What are Canada's AML rules?" → policy
+- "What does FINTRAC require?" → policy
+- "What is AML structuring?" → policy  (prefix 'AML' does not change the topic — still a policy question)
+- "What is AML layering?" → policy
+- "What is AML typology?" → policy
+- "cluster into 3 groups" → segmentation  (user specifying cluster count is still a segmentation request)
+- "I only want 2 business clusters" → segmentation
+- "show me 4 clusters for Individual customers" → segmentation
+- "I want k-means with 3 clusters" → segmentation
 
 Rules:
 - Output ONLY the label(s), comma-separated. No explanation, no punctuation other than commas.
@@ -149,7 +163,7 @@ class OrchestratorAgent:
         # Keyword override — correct obvious misrouting regardless of LLM output
         q_lower = query.lower()
         is_segmentation = any(w in q_lower for w in ["cluster", "segment", "k-means", "kmeans", "treemap"])
-        is_threshold = any(w in q_lower for w in ["sweep", "fp", "fn", "sar", "heatmap", "backtest", "tuning", "threshold"])
+        is_threshold = any(w in q_lower for w in ["sweep", "fp", "fn", "sar", "heatmap", "backtest", "tuning", "threshold", "2d grid", "2d analysis", "grid analysis"])
         is_rule_query = any(w in q_lower for w in ["rule", "rules", "false positive", "false negative", "precision", "layering", "structuring"])
         # "cluster N" in a sweep/backtest query = filter, not segmentation request
         cluster_as_filter = is_threshold and is_segmentation
@@ -165,6 +179,12 @@ class OrchestratorAgent:
         elif "out_of_scope" in labels and (is_threshold or is_rule_query) and not is_segmentation:
             labels = ["threshold"]
             print("[orchestrator] keyword override → threshold (rescued from out_of_scope)")
+
+        # Rescue simple greetings misclassified as out_of_scope
+        _greeting_tokens = {"hello", "hi", "hey", "howdy", "greetings"}
+        if labels == ["out_of_scope"] and q_lower.strip() in _greeting_tokens:
+            labels = ["greeting"]
+            print("[orchestrator] keyword override → greeting (rescued from out_of_scope)")
 
         # Prevent data questions from being classified as greeting
         is_data_question = any(w in q_lower for w in [
@@ -204,7 +224,7 @@ class OrchestratorAgent:
                 labels = ["threshold"]
             elif any(w in q for w in ["cluster", "segment", "k-means", "kmeans", "treemap"]):
                 labels = ["segmentation"]
-            elif any(w in q for w in ["policy", "compliance", "regulation", "bsa", "aml", "wolfsberg", "fincen", "structuring", "bank secrecy", "anti-money", "anti money", "know your customer", "kyc", "cdd", "due diligence", "suspicious activity", "currency transaction"]):
+            elif any(w in q for w in ["policy", "compliance", "regulation", "bsa", "aml", "wolfsberg", "fincen", "structuring", "bank secrecy", "anti-money", "anti money", "know your customer", "kyc", "cdd", "due diligence", "suspicious activity", "currency transaction", "uploaded", "document", "this document", "the file", "according to", "canada", "fintrac", "pcmltfa", "reporting requirement", "filing requirement", "typology", "layering", "placement"]):
                 labels = ["policy"]
             elif any(re.fullmatch(w, tok) for w in ["hello", "hi", "hey", "howdy", "greetings"] for tok in q.split()):
                 labels = ["greeting"]

@@ -140,6 +140,21 @@ class TestThresholdKeywordOverride:
         labels = orch._route("run SAR backtest for Activity Deviation ACH in Cluster 2")
         assert "threshold" in labels
 
+    def test_2d_grid_keyword_routes_to_threshold(self):
+        orch, _ = _make_orchestrator("out_of_scope")
+        labels = orch._route("Show me a 2D grid for Elder Abuse")
+        assert "threshold" in labels
+
+    def test_2d_analysis_keyword_routes_to_threshold(self):
+        orch, _ = _make_orchestrator("out_of_scope")
+        labels = orch._route("Show 2D analysis for Detect Excessive Transaction Activity")
+        assert "threshold" in labels
+
+    def test_grid_analysis_keyword_routes_to_threshold(self):
+        orch, _ = _make_orchestrator("out_of_scope")
+        labels = orch._route("Show grid analysis for Activity Deviation ACH")
+        assert "threshold" in labels
+
 
 # ── OFAC keyword override ──────────────────────────────────────────────────────
 
@@ -189,6 +204,28 @@ class TestKeywordFallback:
     def test_policy_fallback_keyword(self):
         orch, mock_client = _make_orchestrator("bad_label_not_valid")
         labels = orch._route("what is know your customer KYC?")
+        assert "policy" in labels
+
+    def test_canada_keyword_routes_to_policy(self):
+        orch, mock_client = _make_orchestrator("bad_label_not_valid")
+        # "Canada's AML rules" would hit the "rule" threshold fallback first;
+        # use a query with "canada" but no threshold keywords.
+        labels = orch._route("What does AML compliance in Canada require?")
+        assert "policy" in labels
+
+    def test_fintrac_keyword_routes_to_policy(self):
+        orch, mock_client = _make_orchestrator("bad_label_not_valid")
+        labels = orch._route("What does FINTRAC require for suspicious transaction reporting?")
+        assert "policy" in labels
+
+    def test_typology_keyword_routes_to_policy(self):
+        orch, mock_client = _make_orchestrator("bad_label_not_valid")
+        labels = orch._route("What is AML typology?")
+        assert "policy" in labels
+
+    def test_layering_keyword_routes_to_policy(self):
+        orch, mock_client = _make_orchestrator("bad_label_not_valid")
+        labels = orch._route("What is AML layering?")
         assert "policy" in labels
 
     def test_ofac_fallback_keyword(self):
