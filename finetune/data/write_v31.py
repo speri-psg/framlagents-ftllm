@@ -45,7 +45,17 @@ Root cause shared by A, B, C:
     "What does the crossover point mean?" — follow-up clarification
     "What is our overall AML compliance risk rating?" — warmer OOS redirect to rule data
 
-Net: 745 + 26 = 771 examples  ->  aria_train_combined_v31_full.jsonl
+  G (8 ex): Multi-turn conversations — context retention across 3-4 turns
+    MT1 (3T): list_rules → ACH backtest → precision question from context
+    MT2 (3T): ACH backtest → floor_amount clarification → Elder Abuse 2D sweep
+    MT3 (3T): list_rules → thanks → Velocity Single backtest
+    MT4 (3T): Business threshold tuning → crossover question → Velocity Single backtest
+    MT5 (3T): Structuring backtest → small-sample precision question → list_rules
+    MT6 (3T): list_rules → lowest-precision rule from context → ACH backtest topic switch
+    MT7 (4T): list_rules → ACH backtest → Elder Abuse 2D → precision from context
+    MT8 (4T): threshold_tuning → crossover → Velocity Single → FN impact from context
+
+Net: 745 + 34 = 779 examples  ->  aria_train_combined_v31_full.jsonl
 """
 
 import json
@@ -260,6 +270,38 @@ At the highest value (6,500.00): TP=2, FP=0, FN=0, TN=0 (TP rate=100.0%, precisi
 (Detailed sweep table shown in the chart below.)
 === END RULE SWEEP ==="""
 TOOL_STRUCT_FLOOR = f"Tool result for rule_sar_backtest:\n{PC_STRUCT_FLOOR}"
+
+PC_VS = """\
+=== PRE-COMPUTED RULE SAR BACKTEST (copy verbatim) ===
+Rule: Velocity Single | sweep_param: pair_total
+Current: pair_total=20000 => TP=74 FP=404 FN=0 precision=15.5%
+At highest value pair_total=40000: TP=52 FP=273 FN=22 precision=16.0%
+To keep TP rate>=90%: pair_total<=20000 => TP=74 FP=404 FN=0
+=== END PRE-COMPUTED ==="""
+TOOL_VS = f"Tool result for rule_sar_backtest:\n{PC_VS}"
+
+PC_BUS_TT = """\
+PRE-COMPUTED ANALYSIS:
+At the lowest threshold (0), there are 1,486 false positives.
+False positives decrease as the threshold rises.
+False negatives are zero for all thresholds from 0 up to and including 3.
+False negatives first become non-zero at threshold 4 (FN=3).
+False negatives increase as the threshold continues to rise.
+The crossover point is at threshold 45 (FP=12, FN=11).
+The optimal zone spans threshold 38 to 52.
+At threshold 45: FP=12, FN=11.
+At the highest threshold, FP=0, FN=181.
+
+RAW SWEEP (sample):
+threshold=0: FP=1486, FN=0
+threshold=5: FP=1421, FN=8
+threshold=10: FP=1203, FN=12
+threshold=20: FP=891, FN=18
+threshold=38: FP=24, FN=9
+threshold=45: FP=12, FN=11
+threshold=52: FP=3, FN=21
+threshold=100: FP=0, FN=181"""
+TOOL_BUS_TT = f"Tool result for threshold_tuning:\n{PC_BUS_TT}"
 
 # ---------------------------------------------------------------------------
 # Group A — Fix rule_sar_backtest chart-title echo (4 examples)
@@ -656,6 +698,215 @@ examples.append({"messages": [
 ]})
 
 # ---------------------------------------------------------------------------
+# Group G — Multi-turn conversations (8 examples: 6×3-turn, 2×4-turn)
+# All use THRESHOLD_SYSTEM to stay within ThresholdAgent's deployed tool set.
+# Key patterns: context retention, topic switch, mid-conversation thanks,
+# clarification follow-up, and reading back numbers from a prior tool result.
+# ---------------------------------------------------------------------------
+
+_ACH_RESPONSE = (
+    f"{PC_ACH_FLOOR}\n\n"
+    "At the current $50K floor 93.0% of SAR customers are caught (TP=40 of 43) with 63 false "
+    "positive alerts — raising the floor to $90K cuts FP to 18 but drops TP rate to 51.2%."
+)
+_LIST_RESPONSE = f"{PC_LIST_RULES}\n\n{_LR_INSIGHT}"
+_VS_RESPONSE = (
+    f"{PC_VS}\n\n"
+    "At the current pair_total=20,000 all 74 SAR customers are caught (FN=0) — raising to "
+    "40,000 reduces FP from 404 to 273 but introduces 22 missed SARs (FN=22)."
+)
+_EA_2D_RESPONSE = (
+    f"{PC_EA_2D}\n\n"
+    "At the current operating point (floor_amount=5000, z_threshold=3) there are 624 false "
+    "positives — tightening both parameters to floor_amount=8000 and z_threshold=7 halves "
+    "FP to 308 while retaining 50.0% SAR catch rate (TP=92)."
+)
+_BUS_TT_RESPONSE = (
+    f"{PC_BUS_TT}\n\n"
+    "The crossover is at threshold=45 (FP=12, FN=11) — the most balanced operating point "
+    "for Business customers on AVG_TRXNS_WEEK."
+)
+
+# MT1 (3 turns): list_rules → ACH backtest → precision question answered from context
+examples.append({"messages": [
+    {"role": "system",    "content": THRESHOLD_SYSTEM},
+    {"role": "user",      "content": "Show me all AML rules"},
+    {"role": "assistant", "content": None,
+     "tool_calls": [tc("mt1a", "list_rules", {})]},
+    {"role": "tool",      "tool_call_id": "mt1a", "content": TOOL_LIST_RULES},
+    {"role": "assistant", "content": _LIST_RESPONSE},
+    {"role": "user",      "content": "Run SAR backtest for Activity Deviation ACH"},
+    {"role": "assistant", "content": None,
+     "tool_calls": [tc("mt1b", "rule_sar_backtest", {"risk_factor": "Activity Deviation (ACH)"})]},
+    {"role": "tool",      "tool_call_id": "mt1b", "content": TOOL_ACH_FLOOR},
+    {"role": "assistant", "content": _ACH_RESPONSE},
+    {"role": "user",      "content": "What is the current precision for that rule?"},
+    {"role": "assistant", "content": (
+        "At the current condition (floor_amount=50,000): precision=38.8% with TP=40 and FP=63 — "
+        "from the Activity Deviation (ACH) SAR backtest above."
+    )},
+]})
+
+# MT2 (3 turns): ACH backtest → parameter clarification → Elder Abuse 2D sweep
+examples.append({"messages": [
+    {"role": "system",    "content": THRESHOLD_SYSTEM},
+    {"role": "user",      "content": "Show SAR backtest for Activity Deviation ACH"},
+    {"role": "assistant", "content": None,
+     "tool_calls": [tc("mt2a", "rule_sar_backtest", {"risk_factor": "Activity Deviation (ACH)"})]},
+    {"role": "tool",      "tool_call_id": "mt2a", "content": TOOL_ACH_FLOOR},
+    {"role": "assistant", "content": _ACH_RESPONSE},
+    {"role": "user",      "content": "What does floor_amount mean for this rule?"},
+    {"role": "assistant", "content": (
+        "floor_amount is the minimum total monthly outgoing ACH volume a customer must exceed to "
+        "trigger the Activity Deviation (ACH) rule — currently $50,000. Raising it means fewer "
+        "customers breach the threshold, reducing both true positives and false positives."
+    )},
+    {"role": "user",      "content": "Now show the 2D sweep for Elder Abuse"},
+    {"role": "assistant", "content": None,
+     "tool_calls": [tc("mt2b", "rule_2d_sweep", {"risk_factor": "Elder Abuse"})]},
+    {"role": "tool",      "tool_call_id": "mt2b", "content": TOOL_EA_2D},
+    {"role": "assistant", "content": _EA_2D_RESPONSE},
+]})
+
+# MT3 (3 turns): list_rules → thanks mid-conversation → Velocity Single backtest
+examples.append({"messages": [
+    {"role": "system",    "content": THRESHOLD_SYSTEM},
+    {"role": "user",      "content": "List all AML rules"},
+    {"role": "assistant", "content": None,
+     "tool_calls": [tc("mt3a", "list_rules", {})]},
+    {"role": "tool",      "tool_call_id": "mt3a", "content": TOOL_LIST_RULES},
+    {"role": "assistant", "content": _LIST_RESPONSE},
+    {"role": "user",      "content": "Thanks, that's really useful"},
+    {"role": "assistant", "content": (
+        "Glad it was helpful. Let me know when you're ready to drill into a specific rule."
+    )},
+    {"role": "user",      "content": "Run SAR backtest for Velocity Single"},
+    {"role": "assistant", "content": None,
+     "tool_calls": [tc("mt3b", "rule_sar_backtest", {"risk_factor": "Velocity Single"})]},
+    {"role": "tool",      "tool_call_id": "mt3b", "content": TOOL_VS},
+    {"role": "assistant", "content": _VS_RESPONSE},
+]})
+
+# MT4 (3 turns): Business threshold tuning → crossover question → Velocity Single backtest
+examples.append({"messages": [
+    {"role": "system",    "content": THRESHOLD_SYSTEM},
+    {"role": "user",      "content": "Show threshold tuning for Business customers using weekly transaction count"},
+    {"role": "assistant", "content": None,
+     "tool_calls": [tc("mt4a", "threshold_tuning", {"segment": "Business", "threshold_column": "AVG_TRXNS_WEEK"})]},
+    {"role": "tool",      "tool_call_id": "mt4a", "content": TOOL_BUS_TT},
+    {"role": "assistant", "content": _BUS_TT_RESPONSE},
+    {"role": "user",      "content": "What is the crossover point in this sweep?"},
+    {"role": "assistant", "content": (
+        "The crossover is at threshold=45, where FP=12 and FN=11 are approximately equal — "
+        "that is the point where the rule transitions from generating more false positives than "
+        "missed SARs to generating more missed SARs than false positives."
+    )},
+    {"role": "user",      "content": "Now show the SAR backtest for Velocity Single"},
+    {"role": "assistant", "content": None,
+     "tool_calls": [tc("mt4b", "rule_sar_backtest", {"risk_factor": "Velocity Single"})]},
+    {"role": "tool",      "tool_call_id": "mt4b", "content": TOOL_VS},
+    {"role": "assistant", "content": _VS_RESPONSE},
+]})
+
+# MT5 (3 turns): Structuring backtest → small-sample precision question → list_rules for context
+examples.append({"messages": [
+    {"role": "system",    "content": THRESHOLD_SYSTEM},
+    {"role": "user",      "content": "SAR backtest for Structuring Incoming Cash"},
+    {"role": "assistant", "content": None,
+     "tool_calls": [tc("mt5a", "rule_sar_backtest", {"risk_factor": "Structuring (Incoming Cash)"})]},
+    {"role": "tool",      "tool_call_id": "mt5a", "content": TOOL_STRUCT_FLOOR},
+    {"role": "assistant", "content": (
+        f"{PC_STRUCT_FLOOR}\n\n"
+        "Structuring (Incoming Cash) catches all 2 SAR customers at 100.0% precision with zero "
+        "false positives across the full daily_floor sweep from $500 to $6,500."
+    )},
+    {"role": "user",      "content": "Is 100% precision meaningful with only 2 SAR customers?"},
+    {"role": "assistant", "content": (
+        "Precision=100% with 2 SAR customers confirms the rule has not generated any false positives "
+        "so far, but the sample is too small to project confidence. A single false positive would "
+        "drop precision to 66.7%, and a single missed SAR would drop recall to 50.0%. The rule "
+        "should be monitored as alert volume grows before concluding it is well-calibrated."
+    )},
+    {"role": "user",      "content": "Show all rules so I can compare"},
+    {"role": "assistant", "content": None,
+     "tool_calls": [tc("mt5b", "list_rules", {})]},
+    {"role": "tool",      "tool_call_id": "mt5b", "content": TOOL_LIST_RULES},
+    {"role": "assistant", "content": _LIST_RESPONSE},
+]})
+
+# MT6 (3 turns): list_rules → lowest precision active rule from context → ACH backtest topic switch
+examples.append({"messages": [
+    {"role": "system",    "content": THRESHOLD_SYSTEM},
+    {"role": "user",      "content": "Which rules are available?"},
+    {"role": "assistant", "content": None,
+     "tool_calls": [tc("mt6a", "list_rules", {})]},
+    {"role": "tool",      "tool_call_id": "mt6a", "content": TOOL_LIST_RULES},
+    {"role": "assistant", "content": _LIST_RESPONSE},
+    {"role": "user",      "content": "Which active rule has the lowest precision?"},
+    {"role": "assistant", "content": (
+        "CTR Client has the lowest precision among active rules at 8.0% — it generates 2,061 false "
+        "positives for 180 SARs (alerts=2,241). This is the worst precision among the 11 rules "
+        "with production alert data."
+    )},
+    {"role": "user",      "content": "Run SAR backtest for Activity Deviation ACH"},
+    {"role": "assistant", "content": None,
+     "tool_calls": [tc("mt6b", "rule_sar_backtest", {"risk_factor": "Activity Deviation (ACH)"})]},
+    {"role": "tool",      "tool_call_id": "mt6b", "content": TOOL_ACH_FLOOR},
+    {"role": "assistant", "content": _ACH_RESPONSE},
+]})
+
+# MT7 (4 turns): list_rules → ACH backtest → Elder Abuse 2D → precision question from context
+examples.append({"messages": [
+    {"role": "system",    "content": THRESHOLD_SYSTEM},
+    {"role": "user",      "content": "Show all AML rules"},
+    {"role": "assistant", "content": None,
+     "tool_calls": [tc("mt7a", "list_rules", {})]},
+    {"role": "tool",      "tool_call_id": "mt7a", "content": TOOL_LIST_RULES},
+    {"role": "assistant", "content": _LIST_RESPONSE},
+    {"role": "user",      "content": "Run SAR backtest for Activity Deviation ACH"},
+    {"role": "assistant", "content": None,
+     "tool_calls": [tc("mt7b", "rule_sar_backtest", {"risk_factor": "Activity Deviation (ACH)"})]},
+    {"role": "tool",      "tool_call_id": "mt7b", "content": TOOL_ACH_FLOOR},
+    {"role": "assistant", "content": _ACH_RESPONSE},
+    {"role": "user",      "content": "Now show the 2D sweep for Elder Abuse"},
+    {"role": "assistant", "content": None,
+     "tool_calls": [tc("mt7c", "rule_2d_sweep", {"risk_factor": "Elder Abuse"})]},
+    {"role": "tool",      "tool_call_id": "mt7c", "content": TOOL_EA_2D},
+    {"role": "assistant", "content": _EA_2D_RESPONSE},
+    {"role": "user",      "content": "What is the precision at the best FP reduction cell in the 2D sweep?"},
+    {"role": "assistant", "content": (
+        "At the best FP reduction cell (floor_amount=8,000, z_threshold=7): TP=92, FP=308, "
+        "precision=23.0% — from the Elder Abuse 2D sweep result above."
+    )},
+]})
+
+# MT8 (4 turns): threshold_tuning → crossover → Velocity Single → FN impact from context
+examples.append({"messages": [
+    {"role": "system",    "content": THRESHOLD_SYSTEM},
+    {"role": "user",      "content": "Run threshold tuning for Business on AVG_TRXNS_WEEK"},
+    {"role": "assistant", "content": None,
+     "tool_calls": [tc("mt8a", "threshold_tuning", {"segment": "Business", "threshold_column": "AVG_TRXNS_WEEK"})]},
+    {"role": "tool",      "tool_call_id": "mt8a", "content": TOOL_BUS_TT},
+    {"role": "assistant", "content": _BUS_TT_RESPONSE},
+    {"role": "user",      "content": "What is the crossover point?"},
+    {"role": "assistant", "content": (
+        "The crossover is at threshold=45 where FP=12 and FN=11 are approximately equal — "
+        "the most balanced operating point in this sweep."
+    )},
+    {"role": "user",      "content": "Show SAR backtest for Velocity Single"},
+    {"role": "assistant", "content": None,
+     "tool_calls": [tc("mt8b", "rule_sar_backtest", {"risk_factor": "Velocity Single"})]},
+    {"role": "tool",      "tool_call_id": "mt8b", "content": TOOL_VS},
+    {"role": "assistant", "content": _VS_RESPONSE},
+    {"role": "user",      "content": "What happens to FN if I raise pair_total to 40000?"},
+    {"role": "assistant", "content": (
+        "At pair_total=40,000: FN rises from 0 to 22 — meaning 22 SAR customers would be missed "
+        "compared to zero at the current pair_total=20,000. FP falls from 404 to 273 and precision "
+        "improves slightly from 15.5% to 16.0%."
+    )},
+]})
+
+# ---------------------------------------------------------------------------
 # Build V31: load V30 base + append new examples
 # ---------------------------------------------------------------------------
 
@@ -668,7 +919,7 @@ def main():
                 v30.append(json.loads(line))
 
     print(f"[V31] Loaded {len(v30)} examples from {V31_BASE_PATH.name}")
-    print(f"[V31] Adding {len(examples)} new examples (A1-A4, B1-B4, C1-C5, D1-D4, E1-E2, F1-F7)")
+    print(f"[V31] Adding {len(examples)} new examples (A1-A4, B1-B4, C1-C5, D1-D4, E1-E2, F1-F7, G-MT1-MT8)")
 
     all_examples = v30 + examples
     print(f"[V31] Total: {len(all_examples)} -> {V31_FULL_PATH.name}")
