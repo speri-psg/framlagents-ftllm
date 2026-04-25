@@ -37,7 +37,15 @@ Root cause shared by A, B, C:
     "tructuring" / "structring" → OOS
     Fix: 2 examples mapping near-typos to Structuring (Incoming Cash).
 
-Net: 745 + 19 = 764 examples  ->  aria_train_combined_v31_full.jsonl
+  F (7 ex): Conversational / social turns
+    "Thanks, that was helpful" / "Got it, thanks" — short natural acknowledgments
+    "What else can you analyze?" — capability overview (natural, not robotic)
+    "Is 16% precision normal?" — AML knowledge answer
+    "Can you help me write a summary email?" — warmer OOS redirect (offers numbers instead)
+    "What does the crossover point mean?" — follow-up clarification
+    "What is our overall AML compliance risk rating?" — warmer OOS redirect to rule data
+
+Net: 745 + 26 = 771 examples  ->  aria_train_combined_v31_full.jsonl
 """
 
 import json
@@ -554,6 +562,100 @@ examples.append({"messages": [
 ]})
 
 # ---------------------------------------------------------------------------
+# Group F — Conversational / social turns (7 examples)
+# ---------------------------------------------------------------------------
+
+# F1: Thanks/acknowledgment — no tool call, short natural reply
+examples.append({"messages": [
+    {"role": "system",    "content": THRESHOLD_SYSTEM},
+    {"role": "user",      "content": "Thanks, that was really helpful!"},
+    {"role": "assistant", "content": (
+        "Glad it was useful. Let me know if you'd like to explore another rule's "
+        "performance, adjust a threshold, or look at customer segments."
+    )},
+]})
+
+# F2: Minimal acknowledgment
+examples.append({"messages": [
+    {"role": "system",    "content": THRESHOLD_SYSTEM},
+    {"role": "user",      "content": "Got it, thanks"},
+    {"role": "assistant", "content": (
+        "Happy to help. Feel free to ask about SAR backtesting, threshold trade-offs, "
+        "or customer segmentation any time."
+    )},
+]})
+
+# F3: Capability question (beyond the greeting examples already in training data)
+examples.append({"messages": [
+    {"role": "system",    "content": THRESHOLD_SYSTEM},
+    {"role": "user",      "content": "What else can you analyze for me?"},
+    {"role": "assistant", "content": (
+        "Here is what I can analyze:\n\n"
+        "- **SAR backtesting** — For a specific rule (e.g. Elder Abuse, CTR Client), sweep a "
+        "condition parameter and see how many SAR customers are caught vs. missed.\n"
+        "- **Threshold tuning** — FP/FN trade-off as the alert threshold rises or falls, by "
+        "segment (Business or Individual) and column (AVG_TRXNS_WEEK, AVG_TRXN_AMT, TRXN_AMT_MONTHLY).\n"
+        "- **Rule list** — All 16 AML rules with current SAR counts, FP counts, and precision.\n"
+        "- **2D parameter sweeps** — How two rule conditions interact across a grid, with a "
+        "heatmap of FP vs. SAR catch rate.\n"
+        "- **Customer segmentation** — K-Means behavioral clusters for Business or Individual accounts.\n\n"
+        "What would you like to look at?"
+    )},
+]})
+
+# F4: AML knowledge follow-up — "Is 16% precision normal?"
+examples.append({"messages": [
+    {"role": "system",    "content": THRESHOLD_SYSTEM},
+    {"role": "user",      "content": "Is 16% precision normal for AML rules?"},
+    {"role": "assistant", "content": (
+        "Yes — 16% precision (roughly 1 in 6 alerts is a genuine SAR) is within the typical range "
+        "for AML transaction monitoring. Industry benchmarks consistently show false positive rates "
+        "of 85–98% at most financial institutions, which corresponds to precision of 2–15%. Rules "
+        "targeting high-volume broad behaviors (like CTR Client at 8.0%) tend to be less precise; "
+        "rules targeting specific typologies (like Risky International Transfer at 36.2% or "
+        "Structuring Incoming Cash at 100.0%) are more precise because they apply tighter conditions. "
+        "A precision of 16% is not cause for alarm, but a threshold sweep can show whether tightening "
+        "conditions reduces FP volume without unacceptable SAR misses."
+    )},
+]})
+
+# F5: Warmer OOS — writing help redirect (not the robotic bullet-list rejection)
+examples.append({"messages": [
+    {"role": "system",    "content": THRESHOLD_SYSTEM},
+    {"role": "user",      "content": "Can you help me write a summary email about these findings to my manager?"},
+    {"role": "assistant", "content": (
+        "Writing emails is outside what I can help with here. What I can do is get you the exact "
+        "numbers to cite — run a SAR backtest or pull the full rule list and you'll have current "
+        "TP/FP counts and precision figures for whichever rule you want to report on."
+    )},
+]})
+
+# F6: Clarification follow-up — "What does the crossover point mean?"
+examples.append({"messages": [
+    {"role": "system",    "content": THRESHOLD_SYSTEM},
+    {"role": "user",      "content": "What does the crossover point mean in the threshold charts?"},
+    {"role": "assistant", "content": (
+        "The crossover point is the threshold value where FP count and FN count are approximately "
+        "equal. Below the crossover, false positives outnumber missed SARs (over-alerting); above "
+        "it, missed SARs outnumber false positives (under-alerting). For most AML programs, "
+        "regulators expect the threshold to sit at or below the crossover to avoid missing "
+        "suspicious activity, accepting the extra investigator workload from false positives."
+    )},
+]})
+
+# F7: Warmer OOS — compliance risk rating (not hard rejection, redirects to concrete data)
+examples.append({"messages": [
+    {"role": "system",    "content": THRESHOLD_SYSTEM},
+    {"role": "user",      "content": "What is our overall AML compliance risk rating?"},
+    {"role": "assistant", "content": (
+        "I don't have access to your institution's overall compliance risk rating — that comes from "
+        "your BSA/AML risk assessment or regulatory exam documentation. What I can show you are the "
+        "rule-level SAR catch rates and FP volumes that feed into that picture: run a rule list or "
+        "SAR backtest for any specific rule and I'll pull the current numbers."
+    )},
+]})
+
+# ---------------------------------------------------------------------------
 # Build V31: load V30 base + append new examples
 # ---------------------------------------------------------------------------
 
@@ -566,7 +668,7 @@ def main():
                 v30.append(json.loads(line))
 
     print(f"[V31] Loaded {len(v30)} examples from {V31_BASE_PATH.name}")
-    print(f"[V31] Adding {len(examples)} new examples (A1-A4, B1-B4, C1-C5, D1-D4, E1-E2)")
+    print(f"[V31] Adding {len(examples)} new examples (A1-A4, B1-B4, C1-C5, D1-D4, E1-E2, F1-F7)")
 
     all_examples = v30 + examples
     print(f"[V31] Total: {len(all_examples)} -> {V31_FULL_PATH.name}")
