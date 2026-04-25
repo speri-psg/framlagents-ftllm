@@ -27,9 +27,10 @@ from dash import Dash, callback, html, dcc, Input, Output, State, callback_conte
 from dash import dash_table
 from dash_chat import ChatComponent
 
-from config import ALERTS_CSV, SS_CSV, SAR_CSV, CLUSTER_LABELS_CSV, OLLAMA_MODEL, OLLAMA_BASE_URL
+from config import ALERTS_CSV, DS_CSV, SAR_CSV, CLUSTER_LABELS_CSV, OLLAMA_MODEL, OLLAMA_BASE_URL
 from agents import OrchestratorAgent
 from agents.base_agent import stop_event as _agent_stop_event
+import upload_kb
 import lambda_ds_performance
 import lambda_rule_analysis
 import lambda_ofac
@@ -38,7 +39,13 @@ import make_figures
 MAX_SWEEP_ROWS = 10  # max sweep points passed to model (prevents token limit cutoff)
 
 # ── Data loading ──────────────────────────────────────────────────────────────
-_df_raw = pd.read_csv(ALERTS_CSV, sep="\t")
+# Auto-detect separator (production file is tab-separated; synth is comma-separated)
+with open(ALERTS_CSV, "r", encoding="utf-8") as _f:
+    _first_line = _f.readline()
+_sep = "\t" if "\t" in _first_line else ","
+_df_raw = pd.read_csv(ALERTS_CSV, sep=_sep)
+
+# Rename production column names to canonical names (no-op if already canonical)
 _df_raw = _df_raw.rename(columns={
     "AVG_TRXNS_WEEK":  "avg_num_trxns",
     "AVG_TRXN_AMT":    "avg_trxn_amt",
@@ -48,16 +55,42 @@ _df_raw = _df_raw.rename(columns={
     "ALERT":           "alerts",
     "CUSTOMER_TYPE":   "customer_type",
 })
-_df_raw["alerts"]          = _df_raw["alerts"].map({"Yes": 1, "No": 0})
-_df_raw["false_positives"] = _df_raw["false_positives"].map({"Yes": 1, "No": 0})
-_df_raw["false_negatives"] = _df_raw["false_negatives"].map({"Yes": 1, "No": 0})
-_df_raw["dynamic_segment"]= _df_raw["customer_type"].map({"BUSINESS": 0, "INDIVIDUAL": 1})
+# Production uses Yes/No strings; synth uses 0/1 integers — normalise to int
+for _col in ("alerts", "false_positives", "false_negatives"):
+    if _col in _df_raw.columns and _df_raw[_col].dtype == object:
+        _df_raw[_col] = _df_raw[_col].map({"Yes": 1, "No": 0})
+    elif _col not in _df_raw.columns:
+        _df_raw[_col] = 0
+if "dynamic_segment" not in _df_raw.columns:
+    _df_raw["dynamic_segment"] = _df_raw["customer_type"].map({"BUSINESS": 0, "INDIVIDUAL": 1})
 DF           = _df_raw
 DF_BUSINESS  = DF[DF["dynamic_segment"] == 0]
 DF_INDIVIDUAL= DF[DF["dynamic_segment"] == 1]
 
-DF_SS  = pd.read_csv(SS_CSV) if os.path.exists(SS_CSV) else None
+DF_SS  = pd.read_csv(DS_CSV) if os.path.exists(DS_CSV) else None
 DF_SAR = pd.read_csv(SAR_CSV) if os.path.exists(SAR_CSV) else None
+if DF_SAR is not None and "dynamic_segment" not in DF_SAR.columns:
+    DF_SAR["dynamic_segment"] = DF_SAR["customer_type"].map({"BUSINESS": 0, "INDIVIDUAL": 1})
+
+# ── Discover segmentation dimensions from data (≥70% availability, ≤20 unique values) ──
+import lambda_ds_performance as _ldp_cfg
+_DS_DIMS: dict = {}
+if DF_SS is not None:
+    try:
+        from column_mapper import normalize_columns as _norm
+        _df_norm = _norm(DF_SS, verbose=False)
+        _DS_DIMS = {
+            "BUSINESS":   _ldp_cfg.discover_dims(_df_norm, segment="BUSINESS"),
+            "INDIVIDUAL": _ldp_cfg.discover_dims(_df_norm, segment="INDIVIDUAL"),
+        }
+        print(f"Segmentation dims — Business:   {_DS_DIMS['BUSINESS']}")
+        print(f"Segmentation dims — Individual: {_DS_DIMS['INDIVIDUAL']}")
+    except Exception as _e:
+        print(f"discover_dims failed (non-fatal): {_e}")
+        _DS_DIMS = {
+            "BUSINESS":   ["ACCOUNT_TYPE", "ACCOUNT_AGE_CATEGORY"],
+            "INDIVIDUAL": ["ACCOUNT_TYPE", "GENDER", "AGE_CATEGORY", "INCOME_BAND"],
+        }
 
 _TXN_CSV = os.path.join(_HERE, "docs", "aml_transactions.csv")
 DF_TXN   = pd.read_csv(_TXN_CSV, parse_dates=["txn_date"]) if os.path.exists(_TXN_CSV) else None
@@ -367,8 +400,8 @@ def build_network_graph(customer_id):
 
 
 # ── Pre-populate cluster cache at startup ─────────────────────────────────────
-# Runs clustering once so alert-distribution charts work without the user
-# having to run "Cluster all customers" first.
+# Runs clustering for All / Business / Individual so the first user request
+# is served from cache with no delay.
 _startup_cluster_cache = {}
 if DF_SS is not None:
     try:
@@ -382,9 +415,50 @@ if DF_SS is not None:
             "stats":         _sc_stats,
             "customer_type": "All",
         }
-        print(f"Startup cluster cache ready: {len(_sc_df):,} customers, 4 clusters")
+        print(f"Startup cluster cache ready (All): {len(_sc_df):,} customers, 4 clusters")
     except Exception as _e:
         print(f"Startup clustering failed (non-fatal): {_e}")
+
+_startup_cluster_cache_biz = {}
+_startup_cluster_cache_ind = {}
+if DF_SS is not None:
+    try:
+        import lambda_ds_performance as _ldp
+        _biz_fig, _biz_stats, _biz_df = _ldp.perform_clustering(DF_SS, "Business", 4)
+        _startup_cluster_cache_biz = {
+            "df_clustered":  _biz_df,
+            "df_enriched":   _enrich_cluster_df(_biz_df),
+            "scatter_fig":   _biz_fig,
+            "stats":         _biz_stats,
+            "customer_type": "Business",
+        }
+        print(f"Startup cluster cache ready (Business): {len(_biz_df):,} customers, 4 clusters")
+        _ind_fig, _ind_stats, _ind_df = _ldp.perform_clustering(DF_SS, "Individual", 4)
+        _startup_cluster_cache_ind = {
+            "df_clustered":  _ind_df,
+            "df_enriched":   _enrich_cluster_df(_ind_df),
+            "scatter_fig":   _ind_fig,
+            "stats":         _ind_stats,
+            "customer_type": "Individual",
+        }
+        print(f"Startup cluster cache ready (Individual): {len(_ind_df):,} customers, 4 clusters")
+    except Exception as _e:
+        print(f"Startup Business/Individual clustering failed (non-fatal): {_e}")
+
+# ── Build DF_CLUSTER_LABELS from startup cache when CSV labels don't match ─────
+# If the static CSV has no overlap with the current rule sweep data (e.g. synth),
+# derive cluster labels from the All-customers startup clustering instead.
+if DF_CLUSTER_LABELS is None or (
+    DF_RULE_SWEEP is not None
+    and "customer_id" in (DF_CLUSTER_LABELS.columns if DF_CLUSTER_LABELS is not None else [])
+    and len(set(DF_CLUSTER_LABELS["customer_id"]) & set(DF_RULE_SWEEP["customer_id"])) == 0
+):
+    _sc_df = _startup_cluster_cache.get("df_clustered")
+    if _sc_df is not None and "customer_id" in _sc_df.columns:
+        # clusters are 0-based from KMeans; store 1-based to match _filter_by_cluster expectation
+        DF_CLUSTER_LABELS = _sc_df[["customer_id", "cluster"]].copy()
+        DF_CLUSTER_LABELS["cluster"] = DF_CLUSTER_LABELS["cluster"] + 1
+        print(f"Cluster labels: derived from startup cache ({len(DF_CLUSTER_LABELS):,} customers)")
 
 COL_MAP = {
     "AVG_TRXNS_WEEK":   "avg_num_trxns",
@@ -702,6 +776,17 @@ def tool_executor(tool_name, tool_input):
         figs = [f for f in [heatmap, ranked_tbl] if f is not None]
         return text, tuple(figs) if len(figs) > 1 else (figs[0] if figs else None)
 
+    elif tool_name == "cluster_rule_summary":
+        if DF_RULE_SWEEP is None:
+            return "Rule sweep data not found. Run python prepare_rule_sweep_data.py first.", None
+        cluster = tool_input.get("cluster")
+        if cluster is None:
+            return "cluster parameter is required (integer 1–4).", None
+        df_filtered = _filter_by_cluster(DF_RULE_SWEEP, cluster)
+        stats   = lambda_rule_analysis.cluster_rule_summary_text(df_filtered, cluster)
+        tbl_fig = make_figures.rule_list_figure(df_filtered)
+        return stats, tbl_fig
+
     elif tool_name == "list_rules":
         if DF_RULE_SWEEP is None:
             return "Rule sweep data not found. Run python prepare_rule_sweep_data.py first.", None
@@ -738,12 +823,8 @@ def tool_executor(tool_name, tool_input):
             "stats":         stats,
             "customer_type": customer_type,
         })
-        ss_dims = {
-            "BUSINESS":   ["ACCOUNT_TYPE", "ACCOUNT_AGE_CATEGORY"],
-            "INDIVIDUAL": ["ACCOUNT_TYPE", "GENDER", "AGE_CATEGORY", "INCOME_BAND"],
-        }
         treemap_fig = lambda_ds_performance.smartseg_tree_dynamic(
-            df_clustered, customer_type, dims=ss_dims, df_rule_sweep=DF_RULE_SWEEP
+            df_clustered, customer_type, dims=_DS_DIMS, df_rule_sweep=DF_RULE_SWEEP
         )
         return stats, (scatter_fig, treemap_fig)
 
@@ -753,7 +834,7 @@ def tool_executor(tool_name, tool_input):
             df_out = ds_data_prep.prepare_data()
             DF_SS  = df_out
             summary = (
-                f"Data prep complete — docs/ds_segmentation_data.csv\n"
+                f"Data prep complete — {ds_data_prep.OUTPUT_SYNTH if ds_data_prep._USE_SYNTH else ds_data_prep.OUTPUT_FILE}\n"
                 f"Rows: {len(df_out):,} | Columns: {len(df_out.columns)}\n"
                 f"customer_type: {df_out['customer_type'].value_counts().to_dict()}"
             )
@@ -777,11 +858,6 @@ def tool_executor(tool_name, tool_input):
         # if _n_match:
         #     n_clusters = int(_n_match.group(1))
 
-        ss_dims = {
-            "BUSINESS":   ["ACCOUNT_TYPE", "ACCOUNT_AGE_CATEGORY"],
-            "INDIVIDUAL": ["ACCOUNT_TYPE", "GENDER", "AGE_CATEGORY", "INCOME_BAND"],
-        }
-
         if filter_clusters and _cluster_cache:
             # Second call: use cached data, skip re-clustering
             df_clustered = _cluster_cache["df_clustered"]
@@ -804,12 +880,30 @@ def tool_executor(tool_name, tool_input):
                             if 1 <= c <= len(cluster_vals)}
             df_filtered  = df_clustered[df_clustered["cluster"].isin(keep_0based)].copy()
             treemap_fig  = lambda_ds_performance.smartseg_tree_dynamic(
-                df_filtered, f"{customer_type} (clusters {filter_clusters})", dims=ss_dims, df_rule_sweep=DF_RULE_SWEEP
+                df_filtered, f"{customer_type} (clusters {filter_clusters})", dims=_DS_DIMS, df_rule_sweep=DF_RULE_SWEEP
             )
             return f"Filtered to clusters {filter_clusters}.\n\n{stats}", (filtered_scatter, treemap_fig)
 
         else:
-            # First call: run full clustering and cache results
+            # Use startup cache if available and n_clusters matches (avoids recomputing)
+            _prebuilt = {
+                "All":        _startup_cluster_cache,
+                "Business":   _startup_cluster_cache_biz,
+                "Individual": _startup_cluster_cache_ind,
+            }.get(customer_type, {})
+            if _prebuilt and n_clusters == 4:
+                scatter_fig  = _prebuilt["scatter_fig"]
+                stats        = _prebuilt["stats"]
+                df_clustered = _prebuilt["df_clustered"]
+                _cluster_cache.update(_prebuilt)
+                treemap_fig  = lambda_ds_performance.smartseg_tree_dynamic(
+                    df_clustered, customer_type, dims=_DS_DIMS, df_rule_sweep=DF_RULE_SWEEP
+                )
+                stats_table = make_figures.cluster_stats_table(df_clustered, customer_type)
+                figs = (stats_table, scatter_fig, treemap_fig) if stats_table is not None else (scatter_fig, treemap_fig)
+                return stats, figs
+
+            # Cache miss or non-default n_clusters: run full clustering
             scatter_fig, stats, df_clustered = lambda_ds_performance.perform_clustering(
                 DF_SS, customer_type, n_clusters
             )
@@ -821,7 +915,7 @@ def tool_executor(tool_name, tool_input):
                 "customer_type": customer_type,
             })
             treemap_fig  = lambda_ds_performance.smartseg_tree_dynamic(
-                df_clustered, customer_type, dims=ss_dims, df_rule_sweep=DF_RULE_SWEEP
+                df_clustered, customer_type, dims=_DS_DIMS, df_rule_sweep=DF_RULE_SWEEP
             )
             stats_table  = make_figures.cluster_stats_table(df_clustered, customer_type)
             figs = (stats_table, scatter_fig, treemap_fig) if stats_table is not None else (scatter_fig, treemap_fig)
@@ -912,13 +1006,15 @@ def _chart_content(tool_name, tool_input, fig):
         return blocks
 
     elif tool_name in ("cluster_analysis", "ds_cluster_analysis"):
-        ct     = tool_input.get("customer_type", "All")
+        ct = tool_input.get("customer_type", "All")
         if isinstance(fig, tuple) and len(fig) == 3:
-            figs   = list(fig)
-            labels = [f"Cluster Summary — {ct}", f"Cluster Scatter — {ct}", f"Dynamic Segment Treemap — {ct}"]
+            # (stats_table, scatter, treemap) — omit scatter; it lives in the offcanvas
+            figs   = [fig[0], fig[2]]
+            labels = [f"Cluster Summary — {ct}", f"Dynamic Segment Treemap — {ct}"]
         elif isinstance(fig, tuple):
-            figs   = list(fig)
-            labels = [f"Cluster Scatter — {ct}", f"Dynamic Segment Treemap — {ct}"]
+            # (scatter, treemap) — omit scatter
+            figs   = [fig[1]]
+            labels = [f"Dynamic Segment Treemap — {ct}"]
         else:
             figs   = [fig]
             labels = [f"Cluster Analysis — {ct}"]
@@ -1049,6 +1145,16 @@ _sidebar = dbc.Card([
             className="w-100 mb-2",
         ),
 
+        # Cluster scatter — enabled after clustering, hidden by default for AML analysts
+        dbc.Button(
+            "Cluster Scatter Plot",
+            id="scatter-btn",
+            color="outline-secondary",
+            size="sm",
+            disabled=True,
+            className="w-100 mb-2",
+        ),
+
         # SAR priority worklist
         dbc.Button(
             "SAR Priority Worklist",
@@ -1067,6 +1173,7 @@ _chat_panel = html.Div([
         messages=[],
         class_name="AML AI",
         assistant_bubble_style={"maxWidth": "100%", "width": "100%"},
+        supported_input_file_types=[".pdf", ".docx", ".doc", ".txt"],
     ),
     html.Div([
         dbc.Button(
@@ -1139,6 +1246,7 @@ app.layout = dbc.Container([
     dcc.Store(id="scroll-dummy"),
     dcc.Store(id="last-2d-sweep-store", data=None),
     dcc.Store(id="treemap-store", data=None),
+    dcc.Store(id="scatter-store", data=None),
     # One-shot interval to inject welcome message after page load
     dcc.Interval(id="welcome-interval", interval=300, max_intervals=1),
 
@@ -1206,6 +1314,21 @@ app.layout = dbc.Container([
                 "Click any tile above to see customers in that segment.",
                 id="treemap-customer-table",
                 style={"fontSize": "0.85rem", "overflowY": "auto", "maxHeight": "45vh"},
+            ),
+        ],
+    ),
+    # ── Cluster scatter offcanvas ─────────────────────────────────────────────
+    dbc.Offcanvas(
+        id="scatter-offcanvas",
+        title="Cluster Scatter Plot — for explainability",
+        placement="end",
+        is_open=False,
+        style={"width": "65vw"},
+        children=[
+            dcc.Graph(
+                id="scatter-offcanvas-graph",
+                config={"responsive": True},
+                style={"height": "480px"},
             ),
         ],
     ),
@@ -1288,21 +1411,33 @@ def queue_prompt(n_clicks_list):
     return {"query": SUGGESTED_PROMPTS[idx], "ts": time.time()}
 
 
-@callback(
+@server.route("/stop", methods=["POST"])
+def _stop_route():
+    """Direct Flask route — bypasses Dash callback queue so it fires during inference."""
+    _agent_stop_event.set()
+    return flask.jsonify({"ok": True})
+
+
+app.clientside_callback(
+    """
+    function(n_clicks) {
+        if (n_clicks && n_clicks > 0) {
+            fetch('/stop', {method: 'POST'});
+        }
+        return 0;
+    }
+    """,
     Output("stop-btn", "n_clicks"),
     Input("stop-btn", "n_clicks"),
     prevent_initial_call=True,
 )
-def handle_stop(n_clicks):
-    if n_clicks:
-        _agent_stop_event.set()
-    return 0
 
 
 @callback(
     Output("chat-component", "messages"),
     Output("last-2d-sweep-store", "data"),
     Output("treemap-store", "data"),
+    Output("scatter-store", "data"),
     Input("chat-component", "new_message"),
     Input("pending-prompt", "data"),
     State("chat-component", "messages"),
@@ -1317,15 +1452,63 @@ def handle_chat(new_message, pending_prompt, messages):
         query    = pending_prompt["query"]
         user_msg = {"role": "user", "content": query}
     elif new_message and new_message.get("role") == "user":
-        query    = new_message.get("content", "")
+        content = new_message.get("content", "")
+        if isinstance(content, list):
+            # Attachment upload — extract text part; list is processed fully below
+            query = next((b.get("text", "") for b in content
+                          if isinstance(b, dict) and b.get("type") == "text"), "")
+        else:
+            query = content
         user_msg = new_message
     else:
-        return messages, no_update, no_update
+        return messages, no_update, no_update, no_update
 
-    if not query.strip():
-        return messages, no_update, no_update
+    if not query.strip() and not (isinstance(new_message, dict) and isinstance(new_message.get("content"), list)):
+        return messages, no_update, no_update, no_update
 
     updated = messages + [user_msg]
+
+    # ── Attachment handling ───────────────────────────────────────────────────
+    # new_message.content can be a list when a file is attached:
+    # [{type:"text", text:"..."}, {type:"attachment", file:"data:...", fileName:"...", fileType:"..."}]
+    content_list = new_message.get("content") if isinstance(new_message, dict) else None
+    attachment = None
+    text_from_content = None
+    if isinstance(content_list, list):
+        for block in content_list:
+            if isinstance(block, dict):
+                if block.get("type") == "attachment":
+                    attachment = block
+                elif block.get("type") == "text" and block.get("text", "").strip():
+                    text_from_content = block["text"].strip()
+
+    if attachment:
+        file_name = attachment.get("fileName", "uploaded_file")
+        file_type = attachment.get("fileType", "")
+        file_data = attachment.get("file", "")
+        try:
+            n_chunks = upload_kb.ingest_upload(file_data, file_name, file_type)
+            ingest_msg = (
+                f"**'{file_name}'** has been indexed — {n_chunks} chunks stored. "
+                f"You can now ask questions about it."
+            )
+        except Exception as e:
+            ingest_msg = f"Could not index '{file_name}': {e}"
+            # Upload failed — always return immediately, never fall through to agent
+            bot_response = {"role": "assistant", "content": ingest_msg}
+            return updated + [bot_response], no_update, no_update, no_update
+
+        # If the user also typed a question alongside the file, continue to answer it.
+        # Otherwise just confirm and return.
+        if text_from_content:
+            query = text_from_content
+            # Fall through to normal agent routing below
+            ingest_confirmation = ingest_msg
+        else:
+            bot_response = {"role": "assistant", "content": ingest_msg}
+            return updated + [bot_response], no_update, no_update, no_update
+    else:
+        ingest_confirmation = None
 
     # ── Help intent interception (before hitting the model) ──────────────────
     _help_pattern = re.compile(
@@ -1347,7 +1530,10 @@ def handle_chat(new_message, pending_prompt, messages):
             "Try a prompt like: *'Show FP/FN trade-off for Business customers'* or *'Run SAR backtest for Activity Deviation ACH rule'*"
         )
         bot_response = {"role": "assistant", "content": help_text}
-        return updated + [bot_response], no_update, no_update
+        return updated + [bot_response], no_update, no_update, no_update
+
+    # Clear any stale stop signal from a previous button click before starting a new query
+    _agent_stop_event.clear()
 
     try:
         global _current_query
@@ -1356,13 +1542,23 @@ def handle_chat(new_message, pending_prompt, messages):
             (m["content"] for m in reversed(messages) if m.get("role") == "assistant" and isinstance(m.get("content"), str)),
             ""
         )
-        agent_text, chart_results = orchestrator.run(query, tool_executor, last_assistant)
+        # If the user uploaded a document alongside a question, force policy agent
+        # so the question is answered from the KB regardless of query keywords.
+        if ingest_confirmation:
+            agent_text, chart_results = orchestrator.policy_agent.run(query, tool_executor, upload_only=True)
+        else:
+            agent_text, chart_results = orchestrator.run(query, tool_executor, last_assistant)
         print(f"[app] raw agent_text ({len(agent_text or '')} chars): {repr((agent_text or '')[:300])}")
     except Exception as e:
         import traceback
         traceback.print_exc()
-        bot_response = {"role": "assistant", "content": f"Sorry, something went wrong: {e}"}
-        return updated + [bot_response], no_update, no_update
+        err = str(e)
+        if "connection" in err.lower() or "connect" in err.lower():
+            msg_text = f"Cannot reach the model at {OLLAMA_BASE_URL}. Make sure Ollama (or vLLM) is running and the model is loaded."
+        else:
+            msg_text = f"Sorry, something went wrong: {e}"
+        bot_response = {"role": "assistant", "content": msg_text}
+        return updated + [bot_response], no_update, no_update, no_update
 
     # Parse DISPLAY_CLUSTERS directive and filter charts if present
     # Only honour the directive if the user actually asked to filter clusters
@@ -1378,10 +1574,7 @@ def handle_chat(new_message, pending_prompt, messages):
             df_clustered  = _cluster_cache["df_clustered"]
             scatter_fig   = _cluster_cache["scatter_fig"]
             customer_type = _cluster_cache.get("customer_type", "All")
-            ss_dims = {
-                "BUSINESS":   ["ACCOUNT_TYPE", "ACCOUNT_AGE_CATEGORY"],
-                "INDIVIDUAL": ["ACCOUNT_TYPE", "GENDER", "AGE_CATEGORY", "INCOME_BAND"],
-            }
+            ss_dims = _DS_DIMS
             # Filter scatter traces
             keep_names = {f"Cluster {c}" for c in filter_nums}
             filtered_scatter = _go.Figure(
@@ -1393,7 +1586,7 @@ def handle_chat(new_message, pending_prompt, messages):
             keep_0based  = {cluster_vals[c - 1] for c in filter_nums if 1 <= c <= len(cluster_vals)}
             df_filtered  = df_clustered[df_clustered["cluster"].isin(keep_0based)].copy()
             treemap_fig  = lambda_ds_performance.smartseg_tree_dynamic(
-                df_filtered, f"{customer_type} — clusters {filter_nums}", dims=ss_dims, df_rule_sweep=DF_RULE_SWEEP
+                df_filtered, f"{customer_type} — clusters {filter_nums}", dims=_DS_DIMS, df_rule_sweep=DF_RULE_SWEEP
             )
             chart_results = [("ds_cluster_analysis",
                               {"customer_type": customer_type, "filter_clusters": filter_nums},
@@ -1464,13 +1657,14 @@ def handle_chat(new_message, pending_prompt, messages):
         insight = re.sub(r'Available AML rules[^:]*:[^\n]*\n?', '', insight, flags=re.IGNORECASE).strip()
         agent_text = f"Rule performance summary — detailed table shown below.\n\n{insight}" if insight else "Rule performance summary — detailed table shown below."
 
+    prefix = (ingest_confirmation + "\n\n") if ingest_confirmation else ""
     if chart_results:
-        content = [{"type": "text", "text": agent_text}] if agent_text else []
+        content = [{"type": "text", "text": prefix + agent_text}] if (prefix + agent_text) else []
         for tool_name, tool_input, fig in chart_results:
             content.extend(_chart_content(tool_name, tool_input, fig))
         bot_response = {"role": "assistant", "content": content}
     else:
-        bot_response = {"role": "assistant", "content": agent_text or "(No response)"}
+        bot_response = {"role": "assistant", "content": prefix + (agent_text or "(No response)")}
 
     # Signal drill-down store if a 2D sweep was just run
     sweep_store = no_update
@@ -1482,7 +1676,17 @@ def handle_chat(new_message, pending_prompt, messages):
     if any(tn in ("cluster_analysis", "ds_cluster_analysis") for tn, _, _ in (chart_results or [])):
         treemap_store = {"ts": time.time()}
 
-    return updated + [bot_response], sweep_store, treemap_store
+    # Extract scatter figure for the scatter offcanvas button
+    scatter_store = no_update
+    for tn, _, f in (chart_results or []):
+        if tn in ("cluster_analysis", "ds_cluster_analysis") and isinstance(f, tuple):
+            # scatter is always second-to-last in the tuple: (stats?, scatter, treemap)
+            scatter_fig = f[-2]
+            if scatter_fig is not None:
+                scatter_store = scatter_fig.to_dict()
+            break
+
+    return updated + [bot_response], sweep_store, treemap_store, scatter_store
 
 
 # ── Drill-down callbacks ──────────────────────────────────────────────────────
@@ -1608,12 +1812,8 @@ def refresh_treemap_offcanvas(store_data):
     if df_clustered is None:
         return {}
     ct = _cluster_cache.get("customer_type", "All")
-    ss_dims = {
-        "BUSINESS":   ["ACCOUNT_TYPE", "ACCOUNT_AGE_CATEGORY"],
-        "INDIVIDUAL": ["ACCOUNT_TYPE", "GENDER", "AGE_CATEGORY", "INCOME_BAND"],
-    }
     fig = lambda_ds_performance.smartseg_tree_dynamic(
-        df_clustered, ct, dims=ss_dims, df_rule_sweep=DF_RULE_SWEEP
+        df_clustered, ct, dims=_DS_DIMS, df_rule_sweep=DF_RULE_SWEEP
     )
     fig.update_layout(height=380, margin=dict(t=30, b=10, l=10, r=10))
     return fig
@@ -1626,6 +1826,28 @@ def refresh_treemap_offcanvas(store_data):
     prevent_initial_call=True,
 )
 def toggle_treemap_offcanvas(n, is_open):
+    return not is_open
+
+
+@callback(
+    Output("scatter-offcanvas-graph", "figure"),
+    Output("scatter-btn", "disabled"),
+    Input("scatter-store", "data"),
+)
+def refresh_scatter_offcanvas(scatter_data):
+    """Populate the scatter offcanvas and enable its button whenever clustering runs."""
+    if not scatter_data:
+        return {}, True
+    return scatter_data, False
+
+
+@callback(
+    Output("scatter-offcanvas", "is_open"),
+    Input("scatter-btn", "n_clicks"),
+    State("scatter-offcanvas", "is_open"),
+    prevent_initial_call=True,
+)
+def toggle_scatter_offcanvas(n, is_open):
     return not is_open
 
 

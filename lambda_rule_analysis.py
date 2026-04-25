@@ -21,9 +21,10 @@ import pandas as pd
 import numpy as np
 
 _HERE        = os.path.dirname(os.path.abspath(__file__))
-_CSV         = os.path.join(_HERE, "docs", "rule_sweep_data.csv")
 _THRESHOLDS  = os.path.join(_HERE, "rule_thresholds.json")
 _CATALOGUE   = os.path.join(_HERE, "config", "rule_catalogue.json")
+
+from config import RULE_SWEEP_CSV as _CSV
 
 MAX_SWEEP_ROWS = 12
 
@@ -350,10 +351,25 @@ def _match_rule(keyword):
 # ── Load ───────────────────────────────────────────────────────────────────────
 
 def load_rule_sweep_data():
-    """Load pre-computed rule sweep data.  Returns None if file not found."""
+    """Load rule sweep data — production CSV or synthetic (when ARIA_SYNTH_DATA_DIR is set)."""
     if not os.path.exists(_CSV):
         return None
     df = pd.read_csv(_CSV)
+    try:
+        from column_mapper import normalize_columns
+        df = normalize_columns(df, verbose=True)
+    except Exception:
+        pass
+    # Normalise customer_id column name (synth uses aria_customer_id)
+    if "aria_customer_id" in df.columns and "customer_id" not in df.columns:
+        df = df.rename(columns={"aria_customer_id": "customer_id"})
+    # Derive dynamic_segment from customer_type if missing (needed for cluster filter)
+    if "dynamic_segment" not in df.columns and "customer_type" in df.columns:
+        df["dynamic_segment"] = df["customer_type"].str.upper().map(
+            {"BUSINESS": 0, "INDIVIDUAL": 1}
+        )
+    source = "synthetic" if os.getenv("ARIA_SYNTH_DATA_DIR") else "production"
+    print(f"[rule_analysis] loaded {len(df):,} rows from {source} data ({_CSV})")
     return df
 
 
@@ -378,6 +394,51 @@ def list_rules_text(df):
         lines.append(f"  {rf}: alerts={n}, SAR={sar}, FP={fp}, precision={prec}, sweep_params=[{sweep_keys}]")
 
     lines.append("=== END RULE LIST ===")
+    return "\n".join(lines)
+
+
+# ── cluster_rule_summary ───────────────────────────────────────────────────────
+
+def cluster_rule_summary_text(df, cluster_n):
+    """
+    Pre-computed SAR/FP/precision for ALL rules filtered to customers in one cluster.
+
+    Parameters
+    ----------
+    df        : DataFrame already filtered to the target cluster by _filter_by_cluster()
+    cluster_n : int — cluster number (1-based), used only for display
+    """
+    if df is None or len(df) == 0:
+        return (
+            f"=== PRE-COMPUTED CLUSTER RULE SUMMARY (copy this verbatim) ===\n"
+            f"Cluster {cluster_n} — no alert data found for this cluster.\n"
+            f"=== END CLUSTER RULE SUMMARY ==="
+        )
+
+    n_customers = df["customer_id"].nunique() if "customer_id" in df.columns else len(df)
+
+    lines = ["=== PRE-COMPUTED CLUSTER RULE SUMMARY (copy this verbatim) ==="]
+    lines.append(f"Cluster {cluster_n} — {n_customers:,} customers in rule alert data")
+    lines.append("SAR/FP performance for all rules filtered to this cluster:")
+    lines.append("NOTE: alerts=0 means no alerts from this rule for customers in this cluster.")
+
+    active_lines, inactive = [], []
+    for _, entry in RULE_CATALOGUE.items():
+        rf  = entry["name"]
+        grp = df[df["risk_factor"] == rf]
+        n   = len(grp)
+        if n == 0:
+            inactive.append(rf)
+            continue
+        sar  = int(grp["is_sar"].sum())
+        fp   = int((grp["is_sar"] == 0).sum())
+        prec = f"{round(100 * sar / (sar + fp), 1)}%" if (sar + fp) > 0 else "n/a"
+        active_lines.append(f"  {rf}: alerts={n}, SAR={sar}, FP={fp}, precision={prec}")
+
+    lines.extend(active_lines)
+    if inactive:
+        lines.append(f"Rules with alerts=0 in Cluster {cluster_n}: {', '.join(inactive)}")
+    lines.append("=== END CLUSTER RULE SUMMARY ===")
     return "\n".join(lines)
 
 
@@ -407,7 +468,7 @@ def compute_rule_sar_sweep(df, risk_factor_keyword, sweep_param=None, max_rows=M
 
     # Resolve sweep parameter — normalize spaces/hyphens to underscores
     if sweep_param is not None:
-        sweep_param = sweep_param.replace(" ", "_").replace("-", "_")
+        sweep_param = str(sweep_param).replace(" ", "_").replace("-", "_")
     if sweep_param is None or sweep_param not in entry["sweep_params"]:
         sweep_param = entry["default_sweep"]
     sp = entry["sweep_params"][sweep_param]
@@ -677,11 +738,11 @@ def compute_rule_2d_sweep(df, risk_factor_keyword, param1=None, param2=None):
     if param2 is None:
         param2 = default_2d[1]
 
-    # Normalize param names: model may use spaces instead of underscores
+    # Normalize param names: model may use spaces instead of underscores or pass integers
     if param1 is not None:
-        param1 = param1.replace(" ", "_").replace("-", "_")
+        param1 = str(param1).replace(" ", "_").replace("-", "_")
     if param2 is not None:
-        param2 = param2.replace(" ", "_").replace("-", "_")
+        param2 = str(param2).replace(" ", "_").replace("-", "_")
 
     if param1 not in params:
         return f"Unknown sweep_param_1 '{param1}'. Valid: {keys}", None
