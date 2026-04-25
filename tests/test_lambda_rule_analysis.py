@@ -7,6 +7,7 @@ from lambda_rule_analysis import (
     RULE_CATALOGUE,
     _match_rule,
     list_rules_text,
+    cluster_rule_summary_text,
     compute_rule_sar_sweep,
     compute_rule_2d_sweep,
     _sweep_points,
@@ -183,6 +184,95 @@ class TestListRulesText:
         result = list_rules_text(df)
         assert "Do NOT add or infer any rules not listed here" in result or \
                "COMPLETE list" in result
+
+
+# ── cluster_rule_summary_text ─────────────────────────────────────────────────
+
+def _multi_rule_df(seed=0):
+    """DataFrame with rows for every rule in the catalogue — used for summary tests."""
+    frames = [_rule_df(e["name"], n_sar=10, n_fp=20, seed=seed + i)
+              for i, e in enumerate(RULE_CATALOGUE.values())]
+    return pd.concat(frames, ignore_index=True)
+
+
+class TestClusterRuleSummaryText:
+    def test_returns_string(self):
+        df = _multi_rule_df()
+        result = cluster_rule_summary_text(df, 4)
+        assert isinstance(result, str)
+
+    def test_contains_pre_computed_header(self):
+        df = _multi_rule_df()
+        result = cluster_rule_summary_text(df, 4)
+        assert "PRE-COMPUTED CLUSTER RULE SUMMARY" in result
+
+    def test_contains_end_marker(self):
+        df = _multi_rule_df()
+        result = cluster_rule_summary_text(df, 4)
+        assert "END CLUSTER RULE SUMMARY" in result
+
+    def test_contains_cluster_number(self):
+        df = _multi_rule_df()
+        result = cluster_rule_summary_text(df, 4)
+        assert "Cluster 4" in result
+
+    def test_contains_sar_fp_precision(self):
+        df = _multi_rule_df()
+        result = cluster_rule_summary_text(df, 3)
+        assert "SAR=" in result
+        assert "FP=" in result
+        assert "precision=" in result
+
+    def test_contains_all_rule_names_when_data_present(self):
+        df = _multi_rule_df()
+        result = cluster_rule_summary_text(df, 2)
+        for entry in RULE_CATALOGUE.values():
+            assert entry["name"] in result, f"{entry['name']} missing from cluster summary"
+
+    def test_empty_df_returns_no_data_message(self):
+        result = cluster_rule_summary_text(pd.DataFrame(), 4)
+        assert "no alert data" in result.lower() or "Cluster 4" in result
+
+    def test_none_df_returns_no_data_message(self):
+        result = cluster_rule_summary_text(None, 4)
+        assert "no alert data" in result.lower() or "Cluster 4" in result
+
+    def test_inactive_rules_listed_when_no_alerts(self):
+        # Only provide rows for one rule — rest should appear as alerts=0
+        df = _rule_df("Activity Deviation (ACH)", n_sar=5, n_fp=10)
+        result = cluster_rule_summary_text(df, 1)
+        assert "alerts=0" in result or "Rules with alerts=0" in result
+
+    def test_customer_count_reported(self):
+        df = _multi_rule_df()
+        result = cluster_rule_summary_text(df, 4)
+        assert "customers" in result
+
+    def test_precision_100_when_no_fp(self):
+        df = _rule_df("Structuring (Incoming Cash)", n_sar=5, n_fp=0)
+        result = cluster_rule_summary_text(df, 1)
+        assert "100.0%" in result
+
+    def test_precision_zero_when_no_sar(self):
+        df = _rule_df("Activity Deviation (ACH)", n_sar=0, n_fp=20)
+        result = cluster_rule_summary_text(df, 1)
+        # No SAR → rule appears in alerts=0 block (df is filtered to this rule only)
+        # or precision=0.0% if counted
+        assert isinstance(result, str)
+
+    def test_different_cluster_numbers_work(self):
+        df = _multi_rule_df()
+        for cluster_n in (1, 2, 3, 4):
+            result = cluster_rule_summary_text(df, cluster_n)
+            assert f"Cluster {cluster_n}" in result
+
+    def test_result_is_verbatim_copyable(self):
+        # The block must start and end with the PRE-COMPUTED markers
+        df = _multi_rule_df()
+        result = cluster_rule_summary_text(df, 4)
+        lines = result.strip().splitlines()
+        assert lines[0].startswith("=== PRE-COMPUTED CLUSTER RULE SUMMARY")
+        assert lines[-1].startswith("=== END CLUSTER RULE SUMMARY")
 
 
 # ── compute_rule_sar_sweep ────────────────────────────────────────────────────

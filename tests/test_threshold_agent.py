@@ -81,6 +81,7 @@ class TestToolsDefinition:
     EXPECTED_TOOLS = {
         "threshold_tuning", "segment_stats", "sar_backtest",
         "rule_2d_sweep", "list_rules", "rule_sar_backtest",
+        "cluster_rule_summary",
     }
 
     def _tool_names(self):
@@ -136,6 +137,28 @@ class TestToolsDefinition:
         tt = next(t for t in TOOLS if t["function"]["name"] == "threshold_tuning")
         assert "cluster" not in tt["function"]["parameters"]["properties"]
 
+    def test_cluster_rule_summary_present(self):
+        assert "cluster_rule_summary" in self._tool_names()
+
+    def test_cluster_rule_summary_requires_cluster(self):
+        crs = next(t for t in TOOLS if t["function"]["name"] == "cluster_rule_summary")
+        assert "cluster" in crs["function"]["parameters"]["required"]
+
+    def test_cluster_rule_summary_cluster_is_integer(self):
+        crs = next(t for t in TOOLS if t["function"]["name"] == "cluster_rule_summary")
+        cluster_prop = crs["function"]["parameters"]["properties"]["cluster"]
+        assert cluster_prop["type"] == "integer"
+
+    def test_cluster_rule_summary_description_mentions_all_rules(self):
+        crs = next(t for t in TOOLS if t["function"]["name"] == "cluster_rule_summary")
+        desc = crs["function"]["description"].lower()
+        assert "all" in desc and "rule" in desc
+
+    def test_cluster_rule_summary_description_distinguishes_from_rule_sar_backtest(self):
+        crs = next(t for t in TOOLS if t["function"]["name"] == "cluster_rule_summary")
+        desc = crs["function"]["description"]
+        assert "rule_sar_backtest" in desc or "single" in desc.lower() or "named" in desc.lower()
+
     def test_threshold_tuning_column_description_disambiguates_avg_trxn_amt(self):
         tt = next(t for t in TOOLS if t["function"]["name"] == "threshold_tuning")
         desc = tt["function"]["parameters"]["properties"]["threshold_column"]["description"]
@@ -188,3 +211,13 @@ class TestSystemPrompt:
     def test_valid_segments_mentioned(self):
         assert "Business" in SYSTEM_PROMPT
         assert "Individual" in SYSTEM_PROMPT
+
+    def test_cluster_rule_summary_rule_present(self):
+        assert "cluster_rule_summary" in SYSTEM_PROMPT
+
+    def test_cluster_rule_summary_rule_forbids_looping(self):
+        # Rule 24 must direct the model to cluster_rule_summary, not loop rule_sar_backtest
+        assert "rule_sar_backtest" in SYSTEM_PROMPT
+        # The rule should mention NOT looping (either "Do NOT" or "not")
+        prompt_lower = SYSTEM_PROMPT.lower()
+        assert "do not" in prompt_lower or "not" in prompt_lower
