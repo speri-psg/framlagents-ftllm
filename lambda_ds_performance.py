@@ -1,5 +1,5 @@
 import math
-import  os
+import os
 try:
     import boto3
 except ImportError:
@@ -16,55 +16,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 import json
 #import kaleido
-def segment_threshold_tuning(df, segment, threshold):
-    segments=[]
-    segment_total_alerts = []
-    segment_fps=[]
-    segment_btl10_alerts=[]
-    segment_atl10_alerts=[]
-    segment_btl20_alerts=[]
-    segment_atl20_alerts=[]
-    segment_ta_alerts=[]
-
-    segment_current_thresholds=[100,25]
-    segment_threshold_averages=[730, 220]
-    segment_names=['Business', 'Individual']
-    segments.append(segment)
-    segment_total_alerts.append(df[(df['dynamic_segment'] == segment)& ( df[threshold] >= segment_current_thresholds[segment]) & (df['alerts'] == 1)].shape[0])
-    segment_fps.append(df[(df['dynamic_segment'] == segment) & ( df[threshold] >= segment_current_thresholds[segment]) & (df['false_positives'] == 1)].shape[0])
-    segment_btl10_alerts.append(df[(df['dynamic_segment'] == segment)& (df[threshold] >= (segment_current_thresholds[segment]  - segment_current_thresholds[segment] * .1)) & (df['alerts'] == 1)].shape[0] )
-    segment_btl20_alerts.append(df[(df['dynamic_segment'] == segment) & (
-                df[threshold] >= (segment_current_thresholds[segment]  - segment_current_thresholds[segment] * .2)) & (df['alerts'] == 1)].shape[0])
-    segment_atl10_alerts.append(df[(df['dynamic_segment'] == segment)& (df[threshold] >= (segment_current_thresholds[segment]  + segment_current_thresholds[segment] * .1)) & (df['alerts'] == 1)].shape[0] )
-    segment_atl20_alerts.append(df[(df['dynamic_segment'] == segment) & (
-                df[threshold] >= (segment_current_thresholds[segment]  + segment_current_thresholds[segment] * .2)) & (df['alerts'] == 1)].shape[0])
-    segment_ta_alerts.append(df[(df['dynamic_segment'] == segment)& (df['alerts'] == 1) &(
-                df[threshold] >= (segment_threshold_averages[segment] ))].shape[0])
-    data = [
-        go.Bar(name='Total Alerts', x=[segment_names[segment]], y=segment_total_alerts),
-        go.Bar(name='Unproductive Alerts', x=[segment_names[segment]], y=segment_fps),
-        go.Bar(name='Alerts BTL 10%', x=[segment_names[segment]], y=segment_btl10_alerts),
-        go.Bar(name='Alerts BTL 20%', x=[segment_names[segment]], y=segment_btl20_alerts),
-        go.Bar(name='Alerts ATL 10%', x=[segment_names[segment]], y=segment_atl10_alerts),
-        go.Bar(name='Alerts ATL 20%', x=[segment_names[segment]], y=segment_atl20_alerts),
-        go.Bar(name='Alerts using Segment Average', x=[segment_names[segment]], y=segment_ta_alerts),
-    ]
-    fig = go.Figure(data)
-
-    fig.add_annotation(
-        text=f"<b>Total Alerts:{segment_total_alerts[segment]}<br><b>Current Threshold:{segment_current_thresholds[segment]}<br><b>Segment Threshold Mean:{segment_threshold_averages[segment]}",  # Text to display
-        xref="paper",  # Reference the figure's paper coordinates
-        yref="paper",  # Reference the figure's paper coordinates
-        x=1,  # Position the text at the right edge of the figure
-        y=1,  # Position the text at the top edge of the figure
-        showarrow=False,  # No arrow pointing to the text
-        align="right",  # Align the text to the right
-        valign="top"  # Align the text to the top
-    )
-    # Adjust bar width and gap
-    fig.update_traces(width=0.05)  # Make bars thinner
-    fig.update_layout(bargroupgap = 0.01, title=f"Threshold({threshold}) Tuning for {segment_names[segment]} Segment")
-    return fig
 def alerts_distribution(df):
     segment_total_alerts = [
         df[(df['dynamic_segment'] == 0) & (df['alerts'] == 1)].shape[0],
@@ -543,6 +494,58 @@ def _cluster_title(trxns, amt, overall_trxns, overall_amt):
     return f"{freq} / {value}"
 
 
+# Columns excluded from treemap dimension discovery — IDs, numerics, internal flags
+_DIM_EXCLUDE = {
+    'customer_id', 'account_id', 'cluster', 'cluster_label', 'dynamic_segment',
+    'is_sar', 'is_fp', 'is_alerted', 'is_fn', 'pct_active',
+    'avg_num_trxns', 'avg_weekly_trxn_amt', 'trxn_amt_monthly', 'avg_trxn_amt',
+    'income', 'current_balance', 'acct_age_years', 'age',
+    'total_trxn_amt', 'cashout_count', 'sar_score', 'alert_count',
+    'customer_type',  # used as the segment split level, not a sub-dimension
+}
+
+
+def discover_dims(df, segment=None, availability=0.70, max_cardinality=20):
+    """
+    Discover categorical columns suitable as treemap dimensions from df.
+
+    Parameters
+    ----------
+    df             : segmentation DataFrame (output of DS_CSV load)
+    segment        : 'BUSINESS' or 'INDIVIDUAL' — filter df before scanning, or None for all
+    availability   : minimum fraction of non-null values required (default 0.70)
+    max_cardinality: maximum number of unique values for a column to be considered categorical
+
+    Returns
+    -------
+    List of column names suitable as treemap hierarchy dimensions, ordered by availability desc.
+    """
+    if segment and 'customer_type' in df.columns:
+        sub = df[df['customer_type'].str.upper() == segment.upper()]
+    else:
+        sub = df
+
+    if len(sub) == 0:
+        return []
+
+    n = len(sub)
+    scored = []
+    for col in sub.columns:
+        if col.lower() in _DIM_EXCLUDE:
+            continue
+        col_data = sub[col].dropna()
+        avail = len(col_data) / n
+        if avail < availability:
+            continue
+        n_unique = sub[col].nunique(dropna=True)
+        if 1 < n_unique <= max_cardinality:
+            scored.append((col, avail))
+
+    # Sort by availability descending so highest-coverage dims come first
+    scored.sort(key=lambda x: -x[1])
+    return [col for col, _ in scored]
+
+
 def smartseg_tree_dynamic(df_clustered, seg_label="All", dims=None, df_rule_sweep=None):
     """
     Build a treemap from a cluster-labelled DataFrame (output of perform_clustering).
@@ -627,8 +630,8 @@ def smartseg_tree_dynamic(df_clustered, seg_label="All", dims=None, df_rule_swee
         dim = remaining_dims[0]
         if dim not in sub_df.columns:
             return
-        for val, grp in sub_df.groupby(dim, dropna=False):
-            val_str = str(val) if pd.notna(val) else 'Unknown'
+        for val, grp in sub_df.groupby(dim, dropna=True):
+            val_str = str(val)
             node_id = f"{parent_id}__{dim}_{val_str}"
             add_row(node_id, parent_id, val_str, grp, cidx=cidx)
             build_nodes(grp, node_id, remaining_dims[1:], cidx)
@@ -710,7 +713,7 @@ def smartseg_tree_dynamic(df_clustered, seg_label="All", dims=None, df_rule_swee
             'Avg Trxns/Week: %{customdata[0]:.1f}<br>'
             'Avg Weekly Trxn Amt: $%{customdata[1]:.0f}<br>'
             'Avg Monthly Trxn Amt: $%{customdata[3]:.0f}<br>'
-            + ('' if seg_label == 'Business' else
+            + ('' if seg_label.upper() == 'BUSINESS' else
                'Avg Income: $%{customdata[4]:.0f}<br>'
                'Avg Age: %{customdata[5]:.0f}<br>')
             + '─────────────────<br>'

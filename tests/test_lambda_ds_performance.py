@@ -7,7 +7,6 @@ import plotly.express as px
 
 from lambda_ds_performance import (
     alerts_distribution,
-    segment_threshold_tuning,
     plot_thresholds_tuning,
     discover_dims,
     _cluster_title,
@@ -68,27 +67,6 @@ class TestAlertsDistribution:
         })
         fig = alerts_distribution(df)
         assert isinstance(fig, go.Figure)
-
-
-# ── segment_threshold_tuning ───────────────────────────────────────────────────
-
-class TestSegmentThresholdTuning:
-    def test_returns_plotly_figure(self):
-        fig = segment_threshold_tuning(_alerts_df(), segment=0, threshold="AVG_TRXNS_WEEK")
-        assert isinstance(fig, go.Figure)
-
-    def test_figure_has_multiple_traces(self):
-        fig = segment_threshold_tuning(_alerts_df(), segment=0, threshold="AVG_TRXNS_WEEK")
-        assert len(fig.data) >= 2
-
-    def test_figure_title_contains_segment_name(self):
-        fig = segment_threshold_tuning(_alerts_df(), segment=0, threshold="AVG_TRXNS_WEEK")
-        assert "Business" in fig.layout.title.text
-
-    @pytest.mark.xfail(reason="Bug: annotation uses segment as list index but list has only 1 element")
-    def test_individual_segment(self):
-        fig = segment_threshold_tuning(_alerts_df(), segment=1, threshold="AVG_TRXNS_WEEK")
-        assert "Individual" in fig.layout.title.text
 
 
 # ── plot_thresholds_tuning ─────────────────────────────────────────────────────
