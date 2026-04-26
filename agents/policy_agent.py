@@ -20,6 +20,40 @@ import upload_kb as _upload_kb
 
 COLLECTION_NAME = "framl_kb"
 TOP_K = 7
+_MAX_PER_SOURCE = 3  # diversity cap: no single document crowds out others
+
+# Map query keywords → (source file, retrieval_query_override).
+# When the user explicitly names a specific document/resolution, semantic search
+# alone may rank it low if the user's phrasing doesn't match the document's language
+# (e.g. "of banks" when the resolution addresses "states").  The retrieval_query
+# override uses the document's own terminology so the operative clauses surface.
+# Set retrieval_query to None to use the user's original query.
+_TARGETED_SOURCES: list[tuple[list[str], str, str | None]] = [
+    (["1373", "resolution 1373", "unsc 1373"],
+     "UN_SC_Resolution_1373_2001.pdf",
+     "states shall freeze funds criminalize terrorist financing obligations decides"),
+    (["4th amld", "amld4", "amld 4", "2015/849"],
+     "EU_4th_AMLD_2015_849.pdf",
+     "customer due diligence beneficial ownership obliged entities requirements"),
+    (["5th amld", "amld5", "amld 5", "2018/843"],
+     "CELEX_32018L0843_EN_TXT.pdf",
+     "virtual assets beneficial ownership register enhanced due diligence"),
+    (["6th amld", "amld6", "amld 6", "2018/1673"],
+     "CELEX_32018L1673_EN_TXT.pdf",
+     "predicate offences criminal liability money laundering sanctions"),
+    (["amlr", "2024/1624", "eu aml regulation"],
+     "EU_AML_Regulation_2024_1624.pdf",
+     "obliged entities customer due diligence beneficial ownership requirements"),
+    (["unodc", "model provisions"],
+     "UNODC_AML_Model_Provisions.pdf",
+     "model law provisions money laundering financial intelligence unit"),
+    (["fatf", "forty recommendations", "40 recommendation"],
+     "FATF_40_Recommendations.pdf",
+     None),  # FATF chunks already rank high — use original query
+    (["eba gl 2021/02", "eba risk factors"],
+     "EBA_GL_2021_02_MLTF_Risk_Factors.pdf",
+     "risk factors customer due diligence guidelines obliged entities"),
+]
 
 _SYSTEM_PROMPT_TEMPLATE = (
     "You are an AML policy and compliance specialist. "
@@ -89,12 +123,63 @@ class PolicyAgent:
         # ── regulatory KB ────────────────────────────────────────────────────
         if not upload_only and self.collection is not None:
             try:
-                results = self.collection.query(query_texts=[query], n_results=TOP_K)
-                docs  = results["documents"][0]
-                metas = results["metadatas"][0]
-                for src in dict.fromkeys(m["source"] for m in metas):
+                q_lower = query.lower()
+
+                # Targeted pull: when user explicitly names a specific source,
+                # semantic search may rank it low if phrasing doesn't match the
+                # document's language (e.g. "banks" vs "states").  Pre-fetch 2
+                # chunks directly from that source by keyword match.
+                targeted_docs: list[tuple[str, dict]] = []
+                for keywords, source_file, retrieval_query in _TARGETED_SOURCES:
+                    if any(kw in q_lower for kw in keywords):
+                        try:
+                            tgt_q = retrieval_query if retrieval_query else query
+                            tgt = self.collection.query(
+                                query_texts=[tgt_q],
+                                n_results=2,
+                                where={"source": {"$eq": source_file}},
+                            )
+                            for d, m in zip(tgt["documents"][0], tgt["metadatas"][0]):
+                                targeted_docs.append((d, m))
+                            print(f"[policy] targeted pull from {source_file} "
+                                  f"({len(tgt['documents'][0])} chunks)")
+                        except Exception:
+                            pass
+
+                # Semantic query — fetch 3× candidates, apply per-source diversity cap
+                raw = self.collection.query(
+                    query_texts=[query], n_results=min(TOP_K * 3, self.collection.count())
+                )
+                raw_docs  = raw["documents"][0]
+                raw_metas = raw["metadatas"][0]
+
+                seen_per_src: dict[str, int] = {}
+                chosen_docs, chosen_metas = [], []
+
+                # Insert targeted chunks first (they count toward the per-source cap)
+                for d, m in targeted_docs:
+                    src = m["source"]
+                    chosen_docs.append(d)
+                    chosen_metas.append(m)
+                    seen_per_src[src] = seen_per_src.get(src, 0) + 1
+
+                # Fill remaining slots from semantic results, skipping duplicates
+                targeted_ids = {id(d) for d in targeted_docs}
+                for d, m in zip(raw_docs, raw_metas):
+                    if len(chosen_docs) >= TOP_K:
+                        break
+                    src = m["source"]
+                    if d in (td for td, _ in targeted_docs):
+                        continue  # already included via targeted pull
+                    if seen_per_src.get(src, 0) < _MAX_PER_SOURCE:
+                        chosen_docs.append(d)
+                        chosen_metas.append(m)
+                        seen_per_src[src] = seen_per_src.get(src, 0) + 1
+
+                for src in dict.fromkeys(m["source"] for m in chosen_metas):
                     sources.append(src)
-                sections += [f"[Policy: {m['source']}]\n{d}" for d, m in zip(docs, metas)]
+                sections += [f"[Policy: {m['source']}]\n{d}"
+                             for d, m in zip(chosen_docs, chosen_metas)]
             except Exception as e:
                 print(f"PolicyAgent: retrieval error: {e}")
 
