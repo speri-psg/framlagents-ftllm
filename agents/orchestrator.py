@@ -183,7 +183,7 @@ class OrchestratorAgent:
         q_lower = query.lower()
         is_segmentation = any(w in q_lower for w in ["cluster", "segment", "k-means", "kmeans", "treemap"])
         is_threshold = any(w in q_lower for w in ["sweep", "fp", "fn", "sar", "heatmap", "backtest", "tuning", "threshold", "2d grid", "2d analysis", "grid analysis"])
-        is_rule_query = any(w in q_lower for w in ["rule", "rules", "false positive", "false negative", "precision", "layering", "structuring"])
+        is_rule_query = any(w in q_lower for w in ["rule", "rules", "false positive", "false negative", "precision", "layering", "structuring", "structr"])
         # "cluster N" in a sweep/backtest query = filter, not segmentation request
         cluster_as_filter = is_threshold and is_segmentation
         if is_segmentation and not is_threshold:
