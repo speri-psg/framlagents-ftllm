@@ -48,6 +48,50 @@ class TestGreetingRouting:
         labels = orch._route("what is the average balance?")
         assert "greeting" not in labels
 
+    def test_thanks_rescued_as_greeting(self):
+        orch, _ = _make_orchestrator("out_of_scope")
+        labels = orch._route("Thanks, that was helpful!")
+        assert "greeting" in labels
+
+    def test_got_it_thanks_rescued_as_greeting(self):
+        orch, _ = _make_orchestrator("out_of_scope")
+        labels = orch._route("Got it, thanks")
+        assert "greeting" in labels
+
+    def test_thank_you_rescued_as_greeting(self):
+        orch, _ = _make_orchestrator("out_of_scope")
+        labels = orch._route("Thank you")
+        assert "greeting" in labels
+
+
+# ── EU/UN policy keyword override ─────────────────────────────────────────────
+
+class TestPolicyKeywordOverride:
+    def test_beneficial_ownership_routes_to_policy(self):
+        orch, _ = _make_orchestrator("out_of_scope")
+        labels = orch._route("What are the EU requirements for beneficial ownership registers?")
+        assert "policy" in labels
+
+    def test_amld_routes_to_policy(self):
+        orch, _ = _make_orchestrator("out_of_scope")
+        labels = orch._route("What does the 4th AMLD require for customer due diligence?")
+        assert "policy" in labels
+
+    def test_un_resolution_routes_to_policy(self):
+        orch, _ = _make_orchestrator("out_of_scope")
+        labels = orch._route("What does UN Security Council Resolution 1373 require of banks?")
+        assert "policy" in labels
+
+    def test_fatf_routes_to_policy(self):
+        orch, _ = _make_orchestrator("out_of_scope")
+        labels = orch._route("What are FATF recommendations for AML programs?")
+        assert "policy" in labels
+
+    def test_beneficial_owner_routes_to_policy(self):
+        orch, _ = _make_orchestrator("out_of_scope")
+        labels = orch._route("What are the beneficial owner disclosure requirements?")
+        assert "policy" in labels
+
 
 # ── Segmentation keyword override ─────────────────────────────────────────────
 

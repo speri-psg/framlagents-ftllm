@@ -103,6 +103,25 @@ Key distinction:
 - "I only want 2 business clusters" → segmentation
 - "show me 4 clusters for Individual customers" → segmentation
 - "I want k-means with 3 clusters" → segmentation
+- "What are the EU requirements for beneficial ownership registers?" → policy  (EU regulatory question)
+- "What does the 4th AMLD require for customer due diligence?" → policy
+- "What does the 5th AMLD say about virtual assets?" → policy
+- "What are FATF recommendations for banks?" → policy
+- "What does UN Security Council Resolution 1373 require of banks?" → policy
+- "What are EBA guidelines on ML/TF risk factors?" → policy
+- "What are the beneficial ownership disclosure requirements?" → policy
+- "What does the EU AML Regulation require?" → policy
+- "What is the AMLA?" → policy
+- "Does UNODC have guidance on AML?" → policy
+- "What are PEP requirements under AML regulations?" → policy
+- "Thanks, that was helpful!" → greeting
+- "Thanks, that's great" → greeting
+- "Got it, thanks" → greeting
+- "Thank you" → greeting
+- "That was useful, thanks" → greeting
+- "Can you send this to my compliance team?" → out_of_scope  (action request, not an AML analysis task)
+- "Can you email this to someone?" → out_of_scope
+- "Can you export this as a PDF?" → out_of_scope
 
 Rules:
 - Output ONLY the label(s), comma-separated. No explanation, no punctuation other than commas.
@@ -180,11 +199,28 @@ class OrchestratorAgent:
             labels = ["threshold"]
             print("[orchestrator] keyword override → threshold (rescued from out_of_scope)")
 
-        # Rescue simple greetings misclassified as out_of_scope
+        # Rescue EU/UN/FATF/beneficial-ownership policy questions from out_of_scope
+        _policy_kw = [
+            "beneficial ownership", "beneficial owner", "amld", "amla", "directive",
+            "eu aml", "eu regulation", "unodc", "fatf", "financial action task force",
+            "eba guideline", "eba gl", "un security council", "resolution 1373",
+            "politically exposed", "4th amld", "5th amld", "6th amld",
+        ]
+        if labels == ["out_of_scope"] and any(kw in q_lower for kw in _policy_kw):
+            labels = ["policy"]
+            print("[orchestrator] keyword override → policy (EU/UN/FATF/beneficial-ownership)")
+
+        # Rescue greetings and social acknowledgments misclassified as out_of_scope
         _greeting_tokens = {"hello", "hi", "hey", "howdy", "greetings"}
-        if labels == ["out_of_scope"] and q_lower.strip() in _greeting_tokens:
+        _social_phrases  = ["thanks", "thank you", "that was helpful", "that's helpful",
+                            "got it", "great, thanks", "sounds good", "perfect, thanks",
+                            "appreciate it", "cheers"]
+        _is_social = (q_lower.strip() in _greeting_tokens
+                      or any(q_lower.strip().startswith(p) or q_lower.strip() == p
+                             for p in _social_phrases))
+        if labels == ["out_of_scope"] and _is_social:
             labels = ["greeting"]
-            print("[orchestrator] keyword override → greeting (rescued from out_of_scope)")
+            print("[orchestrator] keyword override → greeting (rescued social acknowledgment from out_of_scope)")
 
         # Prevent data questions from being classified as greeting
         is_data_question = any(w in q_lower for w in [
@@ -224,7 +260,22 @@ class OrchestratorAgent:
                 labels = ["threshold"]
             elif any(w in q for w in ["cluster", "segment", "k-means", "kmeans", "treemap"]):
                 labels = ["segmentation"]
-            elif any(w in q for w in ["policy", "compliance", "regulation", "bsa", "aml", "wolfsberg", "fincen", "structuring", "bank secrecy", "anti-money", "anti money", "know your customer", "kyc", "cdd", "due diligence", "suspicious activity", "currency transaction", "uploaded", "document", "this document", "the file", "according to", "canada", "fintrac", "pcmltfa", "reporting requirement", "filing requirement", "typology", "layering", "placement"]):
+            elif any(w in q for w in [
+                "policy", "compliance", "regulation", "bsa", "aml", "wolfsberg", "fincen",
+                "structuring", "bank secrecy", "anti-money", "anti money",
+                "know your customer", "kyc", "cdd", "due diligence",
+                "suspicious activity", "currency transaction",
+                "uploaded", "document", "this document", "the file", "according to",
+                "canada", "fintrac", "pcmltfa", "reporting requirement", "filing requirement",
+                "typology", "layering", "placement",
+                # EU / international regulatory keywords
+                "beneficial ownership", "beneficial owner", "amld", "amla",
+                "directive", "eu aml", "eu regulation", "unodc", "fatf",
+                "financial action task force", "eba guideline", "eba gl",
+                "un security council", "resolution 1373", "wolfsberg",
+                "politically exposed", "pep ", "enhanced due diligence",
+                "4th amld", "5th amld", "6th amld", "sixth amld",
+            ]):
                 labels = ["policy"]
             elif any(re.fullmatch(w, tok) for w in ["hello", "hi", "hey", "howdy", "greetings"] for tok in q.split()):
                 labels = ["greeting"]
