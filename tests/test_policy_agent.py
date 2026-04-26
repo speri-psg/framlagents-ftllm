@@ -134,6 +134,67 @@ class TestStripFabricatedCitations:
         result = agent._strip_fabricated_citations(text, [])
         assert "  " not in result
 
+    # ── EU citation patterns ───────────────────────────────────────────────────
+
+    def test_strips_celex_identifier(self, agent):
+        text = "As per CELEX 32015L0849, customer due diligence is required."
+        result = agent._strip_fabricated_citations(text, [])
+        assert "32015L0849" not in result
+
+    def test_strips_celex_regulation(self, agent):
+        text = "Regulation 32024R1624 sets out CDD obligations."
+        result = agent._strip_fabricated_citations(text, [])
+        assert "32024R1624" not in result
+
+    def test_strips_oj_reference(self, agent):
+        text = "Published in OJ L 141, the directive requires enhanced due diligence."
+        result = agent._strip_fabricated_citations(text, [])
+        assert "OJ L 141" not in result
+
+    def test_strips_oj_date_reference(self, agent):
+        text = "See OJ L 141, 5.6.2015 for the full text."
+        result = agent._strip_fabricated_citations(text, [])
+        assert "OJ L 141, 5.6.2015" not in result
+
+    def test_strips_recital_number(self, agent):
+        text = "Recital 22 of AMLD5 clarifies the scope of virtual assets."
+        result = agent._strip_fabricated_citations(text, [])
+        assert "Recital 22" not in result
+
+    def test_strips_recitals_range(self, agent):
+        text = "Recitals 10-12 provide context for beneficial ownership."
+        result = agent._strip_fabricated_citations(text, [])
+        assert "Recitals 10" not in result
+
+    def test_does_not_strip_article_text_in_allowed_source(self, agent):
+        allowed = ["EU_4th_AMLD_2015_849.pdf"]
+        text = "EU_4th_AMLD_2015_849.pdf covers customer due diligence."
+        result = agent._strip_fabricated_citations(text, allowed)
+        assert "EU_4th_AMLD_2015_849.pdf" in result
+
+    # ── UN citation patterns ───────────────────────────────────────────────────
+
+    def test_strips_non_1373_sres(self, agent):
+        text = "S/RES/1267 established the Al-Qaeda sanctions regime."
+        result = agent._strip_fabricated_citations(text, [])
+        assert "S/RES/1267" not in result
+
+    def test_keeps_resolution_1373_sres(self, agent):
+        # 1373 is in the KB — should not be stripped
+        text = "S/RES/1373 requires states to criminalise terrorist financing."
+        result = agent._strip_fabricated_citations(text, [])
+        assert "S/RES/1373" in result
+
+    def test_strips_non_1373_resolution_word(self, agent):
+        text = "Resolution 1267 targeted Al-Qaeda finances."
+        result = agent._strip_fabricated_citations(text, [])
+        assert "Resolution 1267" not in result
+
+    def test_keeps_resolution_1373_word(self, agent):
+        text = "Resolution 1373 is the primary counter-terrorism financing instrument."
+        result = agent._strip_fabricated_citations(text, [])
+        assert "Resolution 1373" in result
+
 
 # ── Retrieval logic ────────────────────────────────────────────────────────────
 

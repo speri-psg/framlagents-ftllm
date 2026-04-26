@@ -7,7 +7,7 @@ import chromadb
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 from openai import OpenAI
 
-from .base_agent import OLLAMA_BASE_URL, OLLAMA_MODEL
+from .base_agent import OLLAMA_BASE_URL, OLLAMA_MODEL, stop_event
 from config import MAX_TOKENS_POLICY
 
 _AGENTS_DIR   = os.path.dirname(os.path.abspath(__file__))
@@ -16,6 +16,7 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 from config import CHROMA_PATH
+import upload_kb as _upload_kb
 
 COLLECTION_NAME = "framl_kb"
 TOP_K = 7
@@ -33,6 +34,14 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "  * Named authors, law firm names, or individuals\n"
     "  * Any statute name not in the retrieved documents (e.g. USA PATRIOT Act, Bank Secrecy Act)\n"
     "  * Specific dollar thresholds or dates not explicitly stated in the retrieved documents\n"
+    "  * EU Article or paragraph numbers not explicitly quoted in the retrieved documents "
+    "(e.g. do NOT write 'Article 13(1) of AMLD4' or 'Article 45(2) of Regulation 2024/1624' "
+    "unless that exact article text appears in the retrieved chunks below)\n"
+    "  * EU Recital numbers not present in the retrieved documents (e.g. 'Recital 22 of AMLD5')\n"
+    "  * CELEX identifiers (e.g. 32015L0849, 32018L0843, 32024R1624)\n"
+    "  * Official Journal references (e.g. OJ L 141, 5.6.2015)\n"
+    "  * UN Security Council resolution numbers not in the retrieved documents "
+    "(e.g. do NOT write 'UNSC Resolution 1267' unless it appears in the retrieved text)\n"
     "- If the retrieved documents address the question, summarise the concepts they discuss and "
     "reference the document by name from the list above only.\n"
     "IMPORTANT: Only trigger the disclaimer below if ALL retrieved documents are clearly off-topic. "
@@ -72,31 +81,58 @@ class PolicyAgent:
         except Exception as e:
             print(f"PolicyAgent: ChromaDB error: {e}")
 
-    def retrieve(self, query: str) -> tuple:
-        """Returns (context_text, source_names_list)."""
-        if self.collection is None:
-            return "", []
-        try:
-            results = self.collection.query(query_texts=[query], n_results=TOP_K)
-            docs = results["documents"][0]
-            metas = results["metadatas"][0]
-            sources = list(dict.fromkeys(m["source"] for m in metas))  # unique, ordered
-            sections = [f"[Policy: {m['source']}]\n{d}" for d, m in zip(docs, metas)]
-            return "\n\n---\n\n".join(sections), sources
-        except Exception as e:
-            print(f"PolicyAgent: retrieval error: {e}")
-            return "", []
+    def retrieve(self, query: str, upload_only: bool = False) -> tuple:
+        """Returns (context_text, source_names_list) merged from framl_kb + user_uploads.
+        If upload_only=True, skips the regulatory KB and queries only user uploads."""
+        sections, sources = [], []
+
+        # ── regulatory KB ────────────────────────────────────────────────────
+        if not upload_only and self.collection is not None:
+            try:
+                results = self.collection.query(query_texts=[query], n_results=TOP_K)
+                docs  = results["documents"][0]
+                metas = results["metadatas"][0]
+                for src in dict.fromkeys(m["source"] for m in metas):
+                    sources.append(src)
+                sections += [f"[Policy: {m['source']}]\n{d}" for d, m in zip(docs, metas)]
+            except Exception as e:
+                print(f"PolicyAgent: retrieval error: {e}")
+
+        # ── user-uploaded documents ───────────────────────────────────────────
+        upload_ctx, upload_sources = _upload_kb.retrieve(query, top_k=5)
+        if upload_ctx:
+            sections.append(upload_ctx)
+            for s in upload_sources:
+                if s not in sources:
+                    sources.append(s)
+
+        return "\n\n---\n\n".join(sections), sources
 
     # Patterns that indicate fabricated inline citations
     _FABRICATED_PATTERNS = [
+        # ── US patterns ──────────────────────────────────────────────────────
         re.compile(r"\bFIN-\d{4}-[A-Z]\d+\b"),                      # FIN-2020-A005
         re.compile(r"\b31\s+CFR\s+(Part\s+)?\d+(\.\d+)?\b"),        # 31 CFR 1010.314, 31 CFR Part 1020
         re.compile(r"\b(?:Title\s+)?\d+\s+U\.S\.C\.?\s*(?:§\s*\d+)?\b"),  # 31 U.S.C. § 5318, Title 31 U.S.C.
-        re.compile(r"\bU\.S\.C\.?\s*§\s*\d+\b"),                         # U.S.C. § 5318 (standalone)
+        re.compile(r"\bU\.S\.C\.?\s*§\s*\d+\b"),                    # U.S.C. § 5318 (standalone)
         re.compile(r"\bOCC\s+\d{4}-\d+\b", re.IGNORECASE),          # OCC 2000-17
         re.compile(r"\bBSA-\d+\b", re.IGNORECASE),                  # BSA-04
         re.compile(r"\(\s*[a-z]\s*\)\s*\(\s*\d+\s*\)\s*\(\s*[A-Z]\s*\)"),  # (a)(2)(A) orphan subsections
         re.compile(r"\(\s*[a-z]\s*\)\s*\(\s*\d+\s*\)"),             # (a)(1) orphan subsections
+        # ── EU patterns ──────────────────────────────────────────────────────
+        # CELEX identifiers: 3<year><L|R|D><seq> e.g. 32015L0849, 32024R1624
+        re.compile(r"\b3\d{4}[LRD]\d{4}\b"),
+        # OJ references: OJ L 141, OJ C 123/45
+        re.compile(r"\bOJ\s+[LC]\s+\d+(?:/\d+)?\b"),
+        # OJ date references: OJ L 141, 5.6.2015
+        re.compile(r"\bOJ\s+[LC]\s+\d+,\s*\d+\.\d+\.\d{4}\b"),
+        # EU Recital references: Recital 22, Recitals 10–12
+        re.compile(r"\bRecital[s]?\s+\d+(?:\s*[–\-]\s*\d+)?\b", re.IGNORECASE),
+        # ── UN patterns ──────────────────────────────────────────────────────
+        # UNSC resolution numbers other than 1373 (which is in KB): S/RES/NNNN
+        re.compile(r"\bS/RES/(?!1373\b)\d{4}\b"),
+        # Standalone "Resolution NNNN" for non-1373 resolutions
+        re.compile(r"\b(?:Resolution|Res\.)\s+(?!1373\b)\d{3,4}\b", re.IGNORECASE),
     ]
 
     def _strip_fabricated_citations(self, text: str, allowed_sources: list) -> str:
@@ -138,9 +174,9 @@ class PolicyAgent:
                 filtered.append(cleaned)
         return "\n".join(filtered)
 
-    def run(self, query: str, tool_executor=None, policy_context: str = "") -> tuple:
+    def run(self, query: str, tool_executor=None, policy_context: str = "", upload_only: bool = False) -> tuple:
         """Returns (response_text, []) — policy agent produces no charts."""
-        context, sources = self.retrieve(query)
+        context, sources = self.retrieve(query, upload_only=upload_only)
         source_list = ", ".join(sources) if sources else "none"
         system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(source_list=source_list)
 
@@ -149,14 +185,27 @@ class PolicyAgent:
         else:
             user_content = f"## Retrieved Policy Documents\n(No relevant documents found in the knowledge base.)\n\n## Question\n{query}"
 
-        response = self.client.chat.completions.create(
+        stream = self.client.chat.completions.create(
             model=self.model,
             max_tokens=MAX_TOKENS_POLICY,
+            stream=True,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
             ],
         )
-        text = response.choices[0].message.content or ""
+        parts = []
+        try:
+            for chunk in stream:
+                if stop_event.is_set():
+                    stream.close()
+                    stop_event.clear()
+                    return "Cancelled.", []
+                delta = chunk.choices[0].delta.content if chunk.choices else None
+                if delta:
+                    parts.append(delta)
+        except Exception:
+            pass
+        text = "".join(parts)
         text = self._strip_fabricated_citations(text, sources)
         return text, []
