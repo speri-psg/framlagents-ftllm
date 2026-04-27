@@ -1502,11 +1502,23 @@ def handle_chat(new_message, pending_prompt, messages):
         else:
             query = content
         user_msg = new_message
+
+        # Guard: ChatComponent fires new_message after programmatic messages updates,
+        # using the last user message.  Skip if this message has already been processed
+        # (i.e. the last exchange in messages is exactly this user message + an
+        # assistant reply).  This prevents duplicate responses and infinite loops.
+        if (len(messages) >= 2
+                and messages[-2].get("role") == "user"
+                and messages[-2].get("content") == content
+                and messages[-1].get("role") == "assistant"):
+            return no_update, no_update, no_update, no_update
     else:
-        return messages, no_update, no_update, no_update
+        # Programmatic trigger with a non-user message — do nothing.
+        # Return no_update (not messages) to avoid triggering another new_message.
+        return no_update, no_update, no_update, no_update
 
     if not query.strip() and not (isinstance(new_message, dict) and isinstance(new_message.get("content"), list)):
-        return messages, no_update, no_update, no_update
+        return no_update, no_update, no_update, no_update
 
     updated = messages + [user_msg]
 
