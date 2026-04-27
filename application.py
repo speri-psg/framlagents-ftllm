@@ -933,6 +933,48 @@ def tool_executor(tool_name, tool_input):
     return f"Unknown tool: {tool_name}", None
 
 
+# ── Message compaction ───────────────────────────────────────────────────────
+_MAX_CHAT_MESSAGES = 60
+
+def _compact_chart_figures(messages, keep_last_n=2):
+    """
+    Replace Plotly trace data with [] in all but the last `keep_last_n` chart
+    messages.  Prevents unbounded message-list growth: each chart response can
+    add 200KB–2MB of Plotly JSON; after ~5 prompts the payload is large enough
+    to cause browser GC pauses and typing lag.
+
+    Layout/title/axes are preserved so the chart frame stays visible.
+    Only affects {"type": "graph", "props": {"figure": {...}}} blocks.
+    """
+    chart_indices = [
+        i for i, m in enumerate(messages)
+        if isinstance(m.get("content"), list)
+        and any(b.get("type") == "graph" and "props" in b for b in m["content"])
+    ]
+    trim_indices = set(chart_indices[:-keep_last_n]) if len(chart_indices) > keep_last_n else set()
+    if not trim_indices:
+        return messages
+
+    result = list(messages)
+    for i in trim_indices:
+        msg = dict(result[i])
+        new_content = []
+        for block in msg["content"]:
+            if block.get("type") == "graph" and "props" in block:
+                props   = dict(block["props"])
+                fig_raw = props.get("figure", {})
+                props["figure"] = {
+                    "data":   [],
+                    "layout": fig_raw.get("layout", {}) if isinstance(fig_raw, dict) else {},
+                }
+                block = dict(block)
+                block["props"] = props
+            new_content.append(block)
+        msg["content"] = new_content
+        result[i] = msg
+    return result
+
+
 # ── Chart content builder ─────────────────────────────────────────────────────
 def _chart_content(tool_name, tool_input, fig):
     """Convert a tool result figure into dash-chat content blocks."""
@@ -1686,7 +1728,8 @@ def handle_chat(new_message, pending_prompt, messages):
                 scatter_store = scatter_fig.to_dict()
             break
 
-    return updated + [bot_response], sweep_store, treemap_store, scatter_store
+    final_messages = _compact_chart_figures(updated + [bot_response])
+    return final_messages[-_MAX_CHAT_MESSAGES:], sweep_store, treemap_store, scatter_store
 
 
 # ── Drill-down callbacks ──────────────────────────────────────────────────────
