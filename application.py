@@ -936,21 +936,38 @@ def tool_executor(tool_name, tool_input):
 # ── Message compaction + dedup ───────────────────────────────────────────────
 _MAX_CHAT_MESSAGES = 60
 
-# Time-window dedup for handle_chat.
-# ChatComponent fires new_message (with a stored user message) within milliseconds
-# of any messages prop update — including after _compact_chart_figures modifies old
-# chart messages.  Genuine re-submits from the user take >1 second.
-# We record completion time per query content; any re-trigger within _DEDUP_WINDOW
-# is silently dropped.
 import time as _time
-_recent_completions: dict = {}   # content_key → completion timestamp
-_DEDUP_WINDOW_SECS = 2.0
+
+# State-based dedup: when ChatComponent re-fires new_message after a messages
+# prop update, the messages State already ends with [user: Q, assistant: A].
+# Checking the tail is reliable regardless of how long the re-trigger is delayed.
+def _already_answered(messages, query):
+    """Return True if messages[-2:] is already [user: query, assistant: *]."""
+    if len(messages) < 2:
+        return False
+    last = messages[-1]
+    second_last = messages[-2]
+    if last.get("role") != "assistant":
+        return False
+    user_content = second_last.get("content", "")
+    if isinstance(user_content, list):
+        user_content = next(
+            (b.get("text", "") for b in user_content
+             if isinstance(b, dict) and b.get("type") == "text"), ""
+        )
+    return second_last.get("role") == "user" and user_content.strip() == query.strip()
+
+
+# Time-window dedup as secondary defense: catches re-triggers that arrive before
+# the messages State has propagated (e.g. very fast Dash updates).
+_recent_completions: dict = {}
+_DEDUP_WINDOW_SECS = 30.0
 
 
 def _record_completion(key: str) -> None:
     now = _time.time()
     _recent_completions[key] = now
-    stale = [k for k, v in _recent_completions.items() if now - v > 120]
+    stale = [k for k, v in _recent_completions.items() if now - v > 300]
     for k in stale:
         del _recent_completions[k]
 
@@ -1524,11 +1541,11 @@ def handle_chat(new_message, pending_prompt, messages):
         user_msg   = new_message
         _dedup_key = (query[:200] if isinstance(query, str) else "")
 
-        # Time-window guard: ChatComponent fires new_message with a stored user
-        # message within milliseconds of any messages prop update (e.g. after
-        # _compact_chart_figures changes old chart data).  Genuine re-submits from
-        # the user arrive >2 s later, so we can safely drop same-content triggers
-        # that arrive within _DEDUP_WINDOW_SECS of the last completion.
+        # Primary dedup: if messages State already ends with [user: query, assistant: *],
+        # this new_message is a ChatComponent re-trigger — not a genuine user submit.
+        if _already_answered(messages or [], query if isinstance(query, str) else ""):
+            return no_update, no_update, no_update, no_update
+        # Secondary dedup: catch fast re-triggers before messages State propagates.
         if _time.time() - _recent_completions.get(_dedup_key, 0) < _DEDUP_WINDOW_SECS:
             return no_update, no_update, no_update, no_update
     else:
