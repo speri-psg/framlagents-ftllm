@@ -41,7 +41,11 @@ SYSTEM_RULE = (
     "IMPORTANT: You MUST respond entirely in English. "
     "For SAR backtest questions about a specific rule: call rule_sar_backtest directly. "
     "For 2D sweep questions: call rule_2d_sweep directly. "
-    "Do NOT call list_rules when the user asks about a specific rule."
+    "Do NOT call list_rules when the user asks about a specific rule. "
+    "After receiving tool results, the tool result contains a PRE-COMPUTED section. "
+    "You MUST copy that section word-for-word into your response. "
+    "Do NOT change any numbers, thresholds, or directional statements. "
+    "After copying it, add ONE sentence of AML domain insight."
 )
 
 SYSTEM_THRESHOLD = (
@@ -63,7 +67,10 @@ SYSTEM_POLICY = (
     "You are ARIA — Agentic Risk Intelligence for AML — compliance and policy specialist. "
     "You answer AML regulatory and policy questions using a knowledge base of BSA/AML documents. "
     "IMPORTANT: You MUST respond entirely in English. "
-    "ALWAYS call search_policy_kb for regulatory / compliance questions."
+    "ALWAYS call search_policy_kb for regulatory / compliance questions. "
+    "For questions about data availability, portfolio metrics, or how many customers have X: "
+    "respond directly without calling any tool — state that this operational data is not available "
+    "in the knowledge base and suggest the user check their internal compliance system."
 )
 
 SYSTEM_GENERAL = (
@@ -71,6 +78,182 @@ SYSTEM_GENERAL = (
     "You help AML analysts with threshold tuning, customer segmentation, and compliance Q&A. "
     "IMPORTANT: You MUST respond entirely in English."
 )
+
+# V29 canonical tool result — injected in format-check cases
+PC_LIST_RULES = """\
+Tool result for list_rules:
+=== PRE-COMPUTED RULE LIST (copy this verbatim) ===
+Available AML rules with SAR/FP performance (detailed table shown in chart below):
+NOTE: This is the COMPLETE list of 16 rules in the system. Do NOT add or infer any rules not listed here.
+  Activity Deviation (ACH): alerts=487, SAR=82, FP=405, precision=16.8%, sweep_params=[floor_amount, z_threshold]
+  Activity Deviation (Check): alerts=312, SAR=41, FP=271, precision=13.1%, sweep_params=[floor_amount, z_threshold]
+  Elder Abuse: alerts=1146, SAR=188, FP=958, precision=16.4%, sweep_params=[floor_amount, z_threshold, age_threshold]
+  Velocity Single: alerts=478, SAR=74, FP=404, precision=15.5%, sweep_params=[pair_total, ratio_tolerance]
+  Detect Excessive Transaction Activity: alerts=356, SAR=46, FP=310, precision=12.9%, sweep_params=[floor_amount, time_window]
+  Structuring (Incoming Cash): alerts=2, SAR=2, FP=0, precision=100.0%, sweep_params=[daily_floor, days_required]
+  Structuring (Outgoing Cash): alerts=14, SAR=3, FP=11, precision=21.4%, sweep_params=[daily_floor, days_required]
+  CTR Client: alerts=2241, SAR=180, FP=2061, precision=8.0%, sweep_params=[floor_amount]
+  Burst in Originator Activity: alerts=623, SAR=87, FP=536, precision=13.6%, sweep_params=[floor_amount, min_transactions]
+  Burst in Beneficiary Activity: alerts=701, SAR=94, FP=607, precision=11.8%, sweep_params=[floor_amount, min_transactions]
+  Risky International Transfer: alerts=58, SAR=21, FP=37, precision=36.2%, sweep_params=[floor_amount]
+  Activity Deviation (Wire): alerts=0, SAR=0, FP=0, precision=n/a, sweep_params=[floor_amount, z_threshold]
+  Velocity Multiple: alerts=0, SAR=0, FP=0, precision=n/a, sweep_params=[pair_total, min_counterparties]
+  Funnel Account: alerts=0, SAR=0, FP=0, precision=n/a, sweep_params=[floor_amount, min_counterparties]
+  Round-trip: alerts=0, SAR=0, FP=0, precision=n/a, sweep_params=[floor_amount, return_window]
+  Human Trafficking Indicators: alerts=0, SAR=0, FP=0, precision=n/a, sweep_params=[floor_amount, days_required]
+=== END RULE LIST ==="""
+
+# ---------------------------------------------------------------------------
+# Tool schemas — passed to Ollama so the model outputs native tool_calls
+# rather than reasoning text. Mirrors the schemas in agents/threshold_agent.py.
+# ---------------------------------------------------------------------------
+
+_TOOL_threshold_tuning = {
+    "type": "function",
+    "function": {
+        "name": "threshold_tuning",
+        "description": (
+            "Analyze false positive / false negative trade-offs as a threshold column is swept "
+            "for a given customer segment."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "segment": {
+                    "type": "string",
+                    "enum": ["Business", "Individual"],
+                    "description": "Customer segment to analyze.",
+                },
+                "threshold_column": {
+                    "type": "string",
+                    "enum": ["AVG_TRXNS_WEEK", "AVG_TRXN_AMT", "TRXN_AMT_MONTHLY"],
+                    "description": (
+                        "Column to sweep as the alert threshold. "
+                        "AVG_TRXNS_WEEK = average NUMBER of transactions per week (count/frequency). "
+                        "AVG_TRXN_AMT = average DOLLAR AMOUNT per transaction. "
+                        "TRXN_AMT_MONTHLY = average total monthly transaction DOLLAR VOLUME. "
+                        "Use AVG_TRXN_AMT when the user says 'transaction amount', 'average amount', or 'dollar amount'. "
+                        "Use AVG_TRXNS_WEEK when the user says 'transaction count', 'number of transactions', or 'frequency'. "
+                        "Use TRXN_AMT_MONTHLY when the user says 'monthly amount' or 'monthly volume'."
+                    ),
+                },
+            },
+            "required": ["segment", "threshold_column"],
+        },
+    },
+}
+
+_TOOL_rule_sar_backtest = {
+    "type": "function",
+    "function": {
+        "name": "rule_sar_backtest",
+        "description": (
+            "For a specific named AML rule, sweep a rule condition parameter and show "
+            "how many SAR customers are caught vs. missed. Use when the user names a specific "
+            "rule and asks about SAR filing rate, SAR catch rate, SAR detection, or rule backtest."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "risk_factor": {
+                    "type": "string",
+                    "description": (
+                        "Rule name to analyze (e.g. 'Activity Deviation (ACH)', 'Elder Abuse', "
+                        "'Velocity Single', 'CTR Client', 'Detect Excessive Transaction Activity', "
+                        "'Velocity Multiple', 'Human Trafficking Indicators', 'Round-trip')."
+                    ),
+                },
+            },
+            "required": ["risk_factor"],
+        },
+    },
+}
+
+_TOOL_rule_2d_sweep = {
+    "type": "function",
+    "function": {
+        "name": "rule_2d_sweep",
+        "description": (
+            "2D grid sweep: vary two condition parameters simultaneously for an AML rule "
+            "and produce a heatmap. Use when the user asks how two parameters interact, "
+            "wants a grid or heatmap, or wants to optimize two thresholds at once."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "risk_factor": {
+                    "type": "string",
+                    "description": (
+                        "Rule name (e.g. 'Activity Deviation (ACH)', 'Elder Abuse', "
+                        "'Velocity Single', 'Detect Excessive Transaction Activity', "
+                        "'Structuring (Incoming Cash)', 'Funnel Account')."
+                    ),
+                },
+            },
+            "required": ["risk_factor"],
+        },
+    },
+}
+
+_TOOL_list_rules = {
+    "type": "function",
+    "function": {
+        "name": "list_rules",
+        "description": (
+            "List all available AML detection rules with their SAR count, false positive count, "
+            "and precision. Use when no specific rule is named or the user wants an overview."
+        ),
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    },
+}
+
+_TOOL_search_policy_kb = {
+    "type": "function",
+    "function": {
+        "name": "search_policy_kb",
+        "description": "Search the AML policy knowledge base to answer regulatory and compliance questions.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query."},
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+_TOOL_ds_cluster_analysis = {
+    "type": "function",
+    "function": {
+        "name": "ds_cluster_analysis",
+        "description": (
+            "Cluster customers by behavioral features using K-Means. "
+            "Use for segmentation questions about customer clusters or behavioral groups."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "segment": {
+                    "type": "string",
+                    "enum": ["Business", "Individual"],
+                    "description": "Customer segment to cluster.",
+                },
+            },
+            "required": ["segment"],
+        },
+    },
+}
+
+# Map system prompt → tool list sent to Ollama
+TOOLS_BY_SYSTEM = {
+    SYSTEM_RULE:      [_TOOL_rule_sar_backtest, _TOOL_rule_2d_sweep, _TOOL_list_rules],
+    SYSTEM_THRESHOLD: [_TOOL_threshold_tuning, _TOOL_list_rules],
+    SYSTEM_SEG:       [_TOOL_ds_cluster_analysis],
+    SYSTEM_POLICY:    [_TOOL_search_policy_kb],
+    SYSTEM_GENERAL:   [_TOOL_threshold_tuning, _TOOL_rule_sar_backtest,
+                       _TOOL_rule_2d_sweep, _TOOL_list_rules, _TOOL_search_policy_kb,
+                       _TOOL_ds_cluster_analysis],
+}
 
 # ---------------------------------------------------------------------------
 # Benchmark cases
@@ -88,6 +271,7 @@ class Case:
     expected_tool: Optional[str]
     expected_args: dict = field(default_factory=dict)
     human_eval: bool = False
+    format_check: bool = False  # V29: simulate tool result and verify response format
     note: str = ""
 
 CASES = [
@@ -143,10 +327,10 @@ CASES = [
 
     # List rules
     Case("L01", "Show me all AML rules",
-         SYSTEM_RULE, "list_rules", {}),
+         SYSTEM_RULE, "list_rules", {}, format_check=True),
 
     Case("L02", "Which rules generate the most false positives?",
-         SYSTEM_RULE, "list_rules", {}),
+         SYSTEM_RULE, "list_rules", {}, format_check=True),
 
     # Segmentation
     Case("S01", "Cluster Business customers by transaction behavior",
@@ -230,26 +414,111 @@ CASES = [
 # Helpers
 # ---------------------------------------------------------------------------
 
-def chat(base_url: str, model: str, system: str, user: str) -> str:
+def _parse_msg(msg: dict, valid_names: Optional[set] = None) -> tuple:
+    """Return (content_str, (tool_name, tool_args) | None) from an Ollama message dict.
+
+    valid_names: if provided, native tool calls with names outside this set are
+    discarded (the model hallucinated a non-existent tool name).
+    """
+    thinking = msg.get("thinking") or ""
+    content  = msg.get("content")  or ""
+    text = (thinking + "\n" + content).strip() if thinking else content
+
+    # Native Ollama tool_calls take priority — reliable structured output
+    native = msg.get("tool_calls")
+    if native:
+        fn = native[0].get("function", {})
+        name = fn.get("name", "")
+        if name and (valid_names is None or name in valid_names):
+            args = fn.get("arguments", {})
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except Exception:
+                    args = {}
+            return text, (name, args)
+
+    return text, None
+
+
+def chat(base_url: str, model: str, system: str, user: str,
+         tools: Optional[list] = None) -> tuple:
+    """Single-turn chat. Returns (content_str, (tool_name, args) | None).
+
+    Passes tool schemas to Ollama when provided so the model emits native
+    tool_calls instead of reasoning text.
+    """
     url = base_url.rstrip("/").replace("/v1", "") + "/api/chat"
-    payload = json.dumps({
+    body: dict = {
         "model": model,
         "messages": [
             {"role": "system", "content": system},
             {"role": "user",   "content": user},
         ],
         "stream": False,
-    }).encode()
+    }
+    if tools:
+        body["tools"] = tools
+    valid_names = {t["function"]["name"] for t in tools} if tools else None
+    payload = json.dumps(body).encode()
     req = urllib.request.Request(
         url, data=payload,
         headers={"Content-Type": "application/json"},
     )
     with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
         msg = json.loads(resp.read())["message"]
-        # Gemma 4 separates reasoning from output — tool calls may appear in thinking
-        thinking = msg.get("thinking") or ""
-        content  = msg.get("content")  or ""
-        return (thinking + "\n" + content).strip() if thinking else content
+        return _parse_msg(msg, valid_names)
+
+
+def chat_with_result(base_url: str, model: str, system: str, user: str,
+                     tool_name: str, tool_result: str,
+                     tools: Optional[list] = None) -> str:
+    """Two-turn chat: inject a pre-computed tool result and return the model's final response."""
+    url = base_url.rstrip("/").replace("/v1", "") + "/api/chat"
+    body: dict = {
+        "model": model,
+        "messages": [
+            {"role": "system",    "content": system},
+            {"role": "user",      "content": user},
+            {"role": "assistant", "content": "",
+             "tool_calls": [{"function": {"name": tool_name, "arguments": {}}}]},
+            {"role": "tool",      "content": tool_result},
+        ],
+        "stream": False,
+    }
+    if tools:
+        body["tools"] = tools
+    payload = json.dumps(body).encode()
+    req = urllib.request.Request(
+        url, data=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+        msg = json.loads(resp.read())["message"]
+        text, _ = _parse_msg(msg)
+        return text
+
+
+def check_format(content: str) -> tuple:
+    """V29 regression: verify list_rules response has no double-table or stale data.
+
+    Checks:
+      - PRE-COMPUTED RULE LIST block appears exactly once
+      - Old PRE-COMPUTED LIST_RULES RESULT format is absent
+      - Stale '11 AML rules' count is absent
+    """
+    issues = []
+    count = content.count("=== PRE-COMPUTED RULE LIST")
+    if count == 0:
+        issues.append("missing PRE-COMPUTED RULE LIST block")
+    elif count > 1:
+        issues.append(f"double-table: block appears {count}x")
+    if "PRE-COMPUTED LIST_RULES RESULT" in content:
+        issues.append("old LIST_RULES RESULT format present")
+    if "11 AML rules" in content or "system contains 11" in content.lower():
+        issues.append("stale 11-rule count")
+    ok = len(issues) == 0
+    return ok, "ok" if ok else "; ".join(issues)
 
 
 def extract_tool_call(content: str) -> Optional[tuple]:
@@ -442,35 +711,68 @@ def run_benchmark(base_url: str, model: str, verbose: bool):
 
     for case in CASES:
         print(f"[{case.id}] {case.prompt[:65]}...")
+        case_tools = TOOLS_BY_SYSTEM.get(case.system)
         try:
-            content = chat(base_url, model, case.system, case.prompt)
+            content, native_tc = chat(base_url, model, case.system, case.prompt,
+                                      tools=case_tools)
         except Exception as e:
             print(f"  ERROR: {e}\n")
             results.append({"id": case.id, "error": str(e)})
             continue
 
-        tc = extract_tool_call(content)
-        tool_name = tc[0] if tc else None
-        tool_args = tc[1] if tc else {}
+        # Native tool_calls from Ollama take priority; fall back to regex parsing.
+        # For regex fallback, discard any name not in valid_names — Format 5
+        # (natural language scan) regularly false-positives on words like
+        # "following", "knowledge", "available" from decline responses.
+        valid_names = {t["function"]["name"] for t in case_tools} if case_tools else None
+        if native_tc:
+            tool_name, tool_args = native_tc
+        else:
+            parsed = extract_tool_call(content)
+            tool_name = parsed[0] if parsed else None
+            tool_args = parsed[1] if parsed else {}
+            if valid_names and tool_name and tool_name not in valid_names:
+                tool_name, tool_args = None, {}
 
         route_ok, route_detail   = check_routing(case, tool_name)
         args_ok,   args_detail   = check_args(case, tool_args)
 
+        # V29 format check: simulate the tool result turn and verify response format
+        format_ok, format_detail = True, "n/a"
+        format_content = ""
+        if case.format_check and route_ok:
+            try:
+                format_content = chat_with_result(
+                    base_url, model, case.system, case.prompt,
+                    tool_name, PC_LIST_RULES,
+                    # No tools on the second turn — model must produce final text,
+                    # not fire another tool call.
+                )
+                format_ok, format_detail = check_format(format_content)
+            except Exception as e:
+                format_ok, format_detail = False, f"error: {e}"
+
         result = {
-            "id":           case.id,
-            "route_ok":     route_ok,
-            "route_detail": route_detail,
-            "args_ok":      args_ok,
-            "args_detail":  args_detail,
-            "human_eval":   case.human_eval,
-            "content":      content,
+            "id":            case.id,
+            "route_ok":      route_ok,
+            "route_detail":  route_detail,
+            "args_ok":       args_ok,
+            "args_detail":   args_detail,
+            "format_ok":     format_ok,
+            "format_detail": format_detail,
+            "human_eval":    case.human_eval,
+            "content":       content,
         }
         results.append(result)
 
         status = "✓" if route_ok else "✗"
         arg_st = "✓" if args_ok  else "✗"
+        fmt_st = ("✓" if format_ok else "✗") if format_detail != "n/a" else "-"
         print(f"  Route {status} {route_detail}")
         print(f"  Args  {arg_st} {args_detail}")
+        print(f"  Fmt   {fmt_st} {format_detail}")
+        if verbose and format_content:
+            print(f"  Format response (first 500): {format_content[:500].replace(chr(10), ' ')}")
 
         if verbose:
             print(f"  Response (first 1500): {content[:1500].replace(chr(10),' ')}")
@@ -497,8 +799,14 @@ def run_benchmark(base_url: str, model: str, verbose: bool):
     args_pass  = sum(1 for r in non_policy if r["route_ok"] and r["args_ok"])
     args_tot   = sum(1 for r in non_policy if r["route_ok"])  # only scored when routing correct
 
+    fmt_cases = [r for r in non_policy if r.get("format_detail") != "n/a"]
+    fmt_pass  = sum(1 for r in fmt_cases if r.get("format_ok"))
+    fmt_tot   = len(fmt_cases)
+
     print(f"\n  1. Tool routing accuracy : {route_pass}/{route_tot} = {100*route_pass//max(route_tot,1)}%")
     print(f"  2. Parameter accuracy    : {args_pass}/{args_tot}  = {100*args_pass//max(args_tot,1)}%  (of correctly routed)")
+    if fmt_tot:
+        print(f"  3. Format accuracy (V29) : {fmt_pass}/{fmt_tot}  = {100*fmt_pass//max(fmt_tot,1)}%  (list_rules double-table / stale-count check)")
 
     if policy and any("human_score" in r for r in policy):
         scores = [r["human_score"] for r in policy if r.get("human_score") is not None]
@@ -521,6 +829,12 @@ def run_benchmark(base_url: str, model: str, verbose: bool):
         print(f"\n  Arg failures:")
         for r in arg_failures:
             print(f"    [{r['id']}] {r['args_detail']}")
+
+    fmt_failures = [r for r in fmt_cases if not r.get("format_ok")]
+    if fmt_failures:
+        print(f"\n  Format failures (V29):")
+        for r in fmt_failures:
+            print(f"    [{r['id']}] {r['format_detail']}")
 
     print(f"\n{'='*70}\n")
 

@@ -186,7 +186,12 @@ class OrchestratorAgent:
         is_rule_query = any(w in q_lower for w in ["rule", "rules", "false positive", "false negative", "precision", "layering", "structuring", "structr"])
         # "cluster N" in a sweep/backtest query = filter, not segmentation request
         cluster_as_filter = is_threshold and is_segmentation
-        if is_segmentation and not is_threshold:
+        # "rule performance for Cluster X" / "which rules in Cluster 4" → cluster_rule_summary
+        rule_cluster = is_rule_query and is_segmentation
+        if rule_cluster:
+            labels = ["threshold"]
+            print("[orchestrator] keyword override → threshold (rule+cluster → cluster_rule_summary)")
+        elif is_segmentation and not is_threshold:
             labels = ["segmentation"]
             print("[orchestrator] keyword override → segmentation")
         elif cluster_as_filter:

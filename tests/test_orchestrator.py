@@ -122,6 +122,18 @@ class TestSegmentationKeywordOverride:
         assert "segmentation" in labels
         assert "threshold" not in labels
 
+    def test_rule_performance_for_cluster_routes_to_threshold(self):
+        orch, _ = _make_orchestrator("out_of_scope")
+        labels = orch._route("Show all rule performance for Cluster 4")
+        assert "threshold" in labels
+        assert "segmentation" not in labels
+
+    def test_which_rules_in_cluster_routes_to_threshold(self):
+        orch, _ = _make_orchestrator("out_of_scope")
+        labels = orch._route("Which rules perform best in Cluster 2?")
+        assert "threshold" in labels
+        assert "segmentation" not in labels
+
 
 # ── Threshold keyword override ────────────────────────────────────────────────
 
