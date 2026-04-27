@@ -933,8 +933,26 @@ def tool_executor(tool_name, tool_input):
     return f"Unknown tool: {tool_name}", None
 
 
-# ── Message compaction ───────────────────────────────────────────────────────
+# ── Message compaction + dedup ───────────────────────────────────────────────
 _MAX_CHAT_MESSAGES = 60
+
+# Time-window dedup for handle_chat.
+# ChatComponent fires new_message (with a stored user message) within milliseconds
+# of any messages prop update — including after _compact_chart_figures modifies old
+# chart messages.  Genuine re-submits from the user take >1 second.
+# We record completion time per query content; any re-trigger within _DEDUP_WINDOW
+# is silently dropped.
+import time as _time
+_recent_completions: dict = {}   # content_key → completion timestamp
+_DEDUP_WINDOW_SECS = 2.0
+
+
+def _record_completion(key: str) -> None:
+    now = _time.time()
+    _recent_completions[key] = now
+    stale = [k for k, v in _recent_completions.items() if now - v > 120]
+    for k in stale:
+        del _recent_completions[k]
 
 def _compact_chart_figures(messages, keep_last_n=2):
     """
@@ -1490,9 +1508,11 @@ def handle_chat(new_message, pending_prompt, messages):
     trigger = ctx.triggered[0]["prop_id"] if ctx.triggered else ""
 
     # Determine query source
+    _dedup_key = None
     if "pending-prompt" in trigger and pending_prompt:
-        query    = pending_prompt["query"]
-        user_msg = {"role": "user", "content": query}
+        query     = pending_prompt["query"]
+        user_msg  = {"role": "user", "content": query}
+        _dedup_key = query[:200]
     elif new_message and new_message.get("role") == "user":
         content = new_message.get("content", "")
         if isinstance(content, list):
@@ -1501,20 +1521,19 @@ def handle_chat(new_message, pending_prompt, messages):
                           if isinstance(b, dict) and b.get("type") == "text"), "")
         else:
             query = content
-        user_msg = new_message
+        user_msg   = new_message
+        _dedup_key = (query[:200] if isinstance(query, str) else "")
 
-        # Guard: ChatComponent fires new_message after programmatic messages updates,
-        # using the last user message.  Skip if this message has already been processed
-        # (i.e. the last exchange in messages is exactly this user message + an
-        # assistant reply).  This prevents duplicate responses and infinite loops.
-        if (len(messages) >= 2
-                and messages[-2].get("role") == "user"
-                and messages[-2].get("content") == content
-                and messages[-1].get("role") == "assistant"):
+        # Time-window guard: ChatComponent fires new_message with a stored user
+        # message within milliseconds of any messages prop update (e.g. after
+        # _compact_chart_figures changes old chart data).  Genuine re-submits from
+        # the user arrive >2 s later, so we can safely drop same-content triggers
+        # that arrive within _DEDUP_WINDOW_SECS of the last completion.
+        if _time.time() - _recent_completions.get(_dedup_key, 0) < _DEDUP_WINDOW_SECS:
             return no_update, no_update, no_update, no_update
     else:
-        # Programmatic trigger with a non-user message — do nothing.
-        # Return no_update (not messages) to avoid triggering another new_message.
+        # Non-user programmatic trigger — return no_update to avoid a messages
+        # prop write that would fire new_message again.
         return no_update, no_update, no_update, no_update
 
     if not query.strip() and not (isinstance(new_message, dict) and isinstance(new_message.get("content"), list)):
@@ -1740,6 +1759,8 @@ def handle_chat(new_message, pending_prompt, messages):
                 scatter_store = scatter_fig.to_dict()
             break
 
+    if _dedup_key:
+        _record_completion(_dedup_key)
     final_messages = _compact_chart_figures(updated + [bot_response])
     return final_messages[-_MAX_CHAT_MESSAGES:], sweep_store, treemap_store, scatter_store
 
