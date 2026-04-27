@@ -182,10 +182,31 @@ class OrchestratorAgent:
             labels = ["out_of_scope"]
 
         # Keyword override — correct obvious misrouting regardless of LLM output
+        import difflib as _dl
         q_lower = query.lower()
-        is_segmentation = any(w in q_lower for w in ["cluster", "segment", "k-means", "kmeans", "treemap"])
-        is_threshold = any(w in q_lower for w in ["sweep", "fp", "fn", "sar", "heatmap", "backtest", "tuning", "threshold", "2d grid", "2d analysis", "grid analysis"])
-        is_rule_query = any(w in q_lower for w in ["rule", "rules", "false positive", "false negative", "precision", "layering", "structuring", "structr"])
+        _words = q_lower.split()
+
+        def _fuzzy(word_list, terms, cutoff=0.82):
+            """True if any query word is a close match to any term (handles typos)."""
+            for w in word_list:
+                if len(w) < 4:
+                    continue
+                if _dl.get_close_matches(w, terms, n=1, cutoff=cutoff):
+                    return True
+            return False
+
+        is_segmentation = (
+            any(w in q_lower for w in ["cluster", "segment", "k-means", "kmeans", "treemap"])
+            or _fuzzy(_words, ["cluster", "clustering", "segment", "segmentation", "kmeans"])
+        )
+        is_threshold = (
+            any(w in q_lower for w in ["sweep", "fp", "fn", "sar", "heatmap", "backtest", "tuning", "threshold", "2d grid", "2d analysis", "grid analysis"])
+            or _fuzzy(_words, ["threshold", "tuning", "backtest", "heatmap", "sweep"])
+        )
+        is_rule_query = (
+            any(w in q_lower for w in ["rule", "rules", "false positive", "false negative", "precision", "layering", "structuring", "structr"])
+            or _fuzzy(_words, ["precision"])
+        )
         # "cluster N" in a sweep/backtest query = filter, not segmentation request
         cluster_as_filter = is_threshold and is_segmentation
         # "rule performance for Cluster X" / "which rules in Cluster 4" → cluster_rule_summary

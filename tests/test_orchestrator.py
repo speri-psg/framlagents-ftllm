@@ -190,6 +190,11 @@ class TestThresholdKeywordOverride:
         labels = orch._route("what threshold catches 90% of SARs?")
         assert "threshold" in labels
 
+    def test_thrshold_tunning_typo_rescued_as_threshold(self):
+        orch, _ = _make_orchestrator("out_of_scope")
+        labels = orch._route("what is thrshold tunning")
+        assert "threshold" in labels
+
     def test_rule_keyword_rescued_from_out_of_scope(self):
         orch, _ = _make_orchestrator("out_of_scope")
         labels = orch._route("which rules have the most false positives?")
