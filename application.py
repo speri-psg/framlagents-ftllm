@@ -938,24 +938,31 @@ _MAX_CHAT_MESSAGES = 60
 
 import time as _time
 
-# State-based dedup: when ChatComponent re-fires new_message after a messages
-# prop update, the messages State already ends with [user: Q, assistant: A].
-# Checking the tail is reliable regardless of how long the re-trigger is delayed.
+# State-based dedup: ChatComponent can re-fire new_message with ANY stored user
+# message from history (not just the most recent) after a messages prop update.
+# Scan all messages: if the query appears as a user message that already has an
+# assistant response anywhere after it, it's a re-trigger — drop it.
 def _already_answered(messages, query):
-    """Return True if messages[-2:] is already [user: query, assistant: *]."""
-    if len(messages) < 2:
+    """Return True if query already has an assistant response anywhere in messages."""
+    query = query.strip()
+    if not query or not messages:
         return False
-    last = messages[-1]
-    second_last = messages[-2]
-    if last.get("role") != "assistant":
-        return False
-    user_content = second_last.get("content", "")
-    if isinstance(user_content, list):
-        user_content = next(
-            (b.get("text", "") for b in user_content
-             if isinstance(b, dict) and b.get("type") == "text"), ""
-        )
-    return second_last.get("role") == "user" and user_content.strip() == query.strip()
+    for i, msg in enumerate(messages):
+        if msg.get("role") != "user":
+            continue
+        user_content = msg.get("content", "")
+        if isinstance(user_content, list):
+            user_content = next(
+                (b.get("text", "") for b in user_content
+                 if isinstance(b, dict) and b.get("type") == "text"), ""
+            )
+        if user_content.strip() != query:
+            continue
+        # Matched — check if any assistant message follows
+        for j in range(i + 1, len(messages)):
+            if messages[j].get("role") == "assistant":
+                return True
+    return False
 
 
 # Time-window dedup as secondary defense: catches re-triggers that arrive before
