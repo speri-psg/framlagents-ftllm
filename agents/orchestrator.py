@@ -210,6 +210,8 @@ class OrchestratorAgent:
             "eu aml", "eu regulation", "unodc", "fatf", "financial action task force",
             "eba guideline", "eba gl", "un security council", "resolution 1373",
             "politically exposed", "4th amld", "5th amld", "6th amld",
+            "smurfing",  # common synonym for structuring
+            "tructur",   # catches "tructuring" typo (structuring missing leading 's')
         ]
         if labels == ["out_of_scope"] and any(kw in q_lower for kw in _policy_kw):
             labels = ["policy"]
@@ -267,7 +269,7 @@ class OrchestratorAgent:
                 labels = ["segmentation"]
             elif any(w in q for w in [
                 "policy", "compliance", "regulation", "bsa", "aml", "wolfsberg", "fincen",
-                "structuring", "bank secrecy", "anti-money", "anti money",
+                "structuring", "smurfing", "bank secrecy", "anti-money", "anti money",
                 "know your customer", "kyc", "cdd", "due diligence",
                 "suspicious activity", "currency transaction",
                 "uploaded", "document", "this document", "the file", "according to",

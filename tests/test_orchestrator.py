@@ -92,6 +92,16 @@ class TestPolicyKeywordOverride:
         labels = orch._route("What are the beneficial owner disclosure requirements?")
         assert "policy" in labels
 
+    def test_tructuring_typo_rescued_as_policy(self):
+        orch, _ = _make_orchestrator("out_of_scope")
+        labels = orch._route("what is tructuring")
+        assert "policy" in labels
+
+    def test_smurfing_rescued_as_policy(self):
+        orch, _ = _make_orchestrator("out_of_scope")
+        labels = orch._route("What is smurfing?")
+        assert "policy" in labels
+
 
 # ── Segmentation keyword override ─────────────────────────────────────────────
 
