@@ -97,6 +97,8 @@ Key distinction:
 - "What are Canada's AML rules?" → policy
 - "What does FINTRAC require?" → policy
 - "What is AML structuring?" → policy  (prefix 'AML' does not change the topic — still a policy question)
+- "What is tructuring?" → policy  (typo for 'structuring' — still an AML definition question)
+- "What is smurfing?" → policy  (synonym for structuring — AML definition question)
 - "What is AML layering?" → policy
 - "What is AML typology?" → policy
 - "cluster into 3 groups" → segmentation  (user specifying cluster count is still a segmentation request)
