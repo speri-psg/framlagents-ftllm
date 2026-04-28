@@ -281,12 +281,19 @@ class OrchestratorAgent:
             labels = ["policy"]
             print("[orchestrator] keyword override → policy (OFAC data query)")
 
+        # Threshold column names as bare replies (clarification follow-ups)
+        _THRESHOLD_COLS = {"avg_trxns_week", "avg_trxn_amt", "trxn_amt_monthly"}
+        if q_lower.strip() in _THRESHOLD_COLS:
+            labels = ["threshold"]
+            print("[orchestrator] keyword override → threshold (bare column name reply)")
+
         # Keyword fallback when fine-tuned model ignores classification prompt
         if not labels:
             q = query.lower()
             if any(w in q for w in ["ofac", "sdn", "sanction"]):
                 labels = ["ofac"]
-            elif any(w in q for w in ["threshold", "sweep", "fp", "fn", "sar", "heatmap", "rule", "alert", "tuning", "backtest"]):
+            elif any(w in q for w in ["threshold", "sweep", "fp", "fn", "sar", "heatmap", "rule", "alert", "tuning", "backtest",
+                                      "avg_trxns_week", "avg_trxn_amt", "trxn_amt_monthly"]):
                 labels = ["threshold"]
             elif any(w in q for w in ["cluster", "segment", "k-means", "kmeans", "treemap"]):
                 labels = ["segmentation"]
