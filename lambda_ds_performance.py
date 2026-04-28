@@ -1,13 +1,5 @@
 import math
 import os
-try:
-    import boto3
-except ImportError:
-    boto3 = None  # only needed for show_ds_performance() (legacy AWS Lambda function)
-try:
-    import botocore
-except ImportError:
-    botocore = None  # only needed for legacy AWS Lambda functions
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
@@ -309,44 +301,6 @@ def add_sub_plots(fig, subplot, row_id, col_id, x_title, y_title):
         fig.update_xaxes(title_text=x_title, row=row_id, col=col_id)
         fig.update_yaxes(title_text=y_title, row=row_id, col=col_id)
     return fig
-
-def show_ds_performance():
-    #os.chdir("/tmp/") # this is for a lambda function which has only access to /tmp of aws EC2
-    try:
-        s3 = boto3.client('s3')
-        bucket_name = 'sagemaker-us-east-1-143337186090'
-        file_key = 'framl_ss_data_xl.xlsx'# Download the file from S3
-        s3.download_file(bucket_name, file_key, 'framl_ss_data.xlsx')
-        df_alerts = pd.read_excel("framl_ss_data.xlsx", sheet_name='alerts')
-        #print(df_alerts.head(5))
-
-        for segment in df_alerts['dynamic_segment'].unique():
-            df_segment = df_alerts[df_alerts['dynamic_segment'] == segment] #segment level transactions, trxn aggregates and alerts
-            segment_type = df_segment['customer_type'].unique()
-            fig1 = plot_pct_metric(df_segment, 'Jstat')
-            threshold = 'avg_trxn_amt'
-            fig2 = plot_thresholds_metric(df_segment,threshold, .1,  segment_type, 'Jstat')
-            fig3 = tpr_fpr_plot(df_segment)
-            fig4, fig6 = plot_pct_metric(df_segment, 'F1')
-            fig5 = plot_thresholds_metric(df_segment,threshold, .1,  segment_type, 'F1')
-            #plot_thresholds_Jstat(df_segment,'avg_num_trxns', .1,  segment)
-            fig = make_subplots(rows=2, cols=3) # subplot_titles= (f"Segment:{segment}",f"Segment:{segment}",f"Segment:{segment}" ))
-                                #subplot_titles=(f'Segment_{segment} Percentile vs J Statistic', f'Segment_{segment} #{threshold} vs J Statistic', f'Segment_{segment} FPR Vs TPR'))# specs=[[{"type": "line"}, {"type": "line"}, {"type": "line"}]])
-            fig = add_sub_plots(fig, fig1, 1,1,"Percentile", "J Statistic")
-            fig = add_sub_plots(fig, fig2, 1,2,f"{threshold}", "J Statistic")
-            fig = add_sub_plots(fig, fig3, 1,3,"FPR", "TPR")
-            fig = add_sub_plots(fig, fig4, 2,1,"Percentile", "F1")
-            fig = add_sub_plots(fig, fig5, 2,2,f"{threshold}", "F1")
-            fig = add_sub_plots(fig, fig6, 2,3,"Recall", "Precision")
-            fig.update_layout(title_text=f'Threshold Tuning Plots for segment:{segment_type}', showlegend=False)
-            fig.write_html("threshold_tuning.html")
-            bucket_name = 'framl-agents'
-            s3.upload_file("threshold_tuning.html", bucket_name, f"threshold_tuning_segment_{segment}.html")
-            with open(f"tt_plot_{segment}.json", 'w') as f:
-                json.dump(fig.to_json(), f)
-        return fig
-    except Exception as e:
-        print (f"exception:{e}")
 
 def perform_clustering(df, customer_type=None, n_clusters=4):
     """
@@ -736,36 +690,5 @@ def smartseg_tree_dynamic(df_clustered, seg_label="All", dims=None, df_rule_swee
     return fig
 
 
-def lambda_handler(event, context):
-    agent = event['agent']
-    actionGroup = event['actionGroup']
-    function = event['function']
-    parameters = event.get('parameters', [])
-    bucket_name = show_ds_performance()
-    # Execute your business logic here. For more information, refer to: https://docs.aws.amazon.com/bedrock/latest/userguide/agents-lambda.html
-    responseBody =  {
-        "TEXT": {
-            "body": f'segment level threshold tuning files are created in the S3 bucket:{bucket_name}'
-        },
-            "sessionAttributes": {
-            "generatedFileS3Bucket": bucket_name,
-            "generatedFileS3Key": bucket_name
-        }
-    }
-
-    action_response = {
-        'actionGroup': actionGroup,
-        'function': function,
-        'functionResponse': {
-            'responseBody': responseBody
-        }
-
-    }
-    response = {'response': action_response, 'messageVersion': event['messageVersion']}
-    print("Response: {}".format(response))
-
-    return response
 if __name__ == "__main__":
-
-    response = show_ds_performance()
-    i=0
+    pass
