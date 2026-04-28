@@ -968,7 +968,7 @@ def _already_answered(messages, query):
 # Time-window dedup as secondary defense: catches re-triggers that arrive before
 # the messages State has propagated (e.g. very fast Dash updates).
 _recent_completions: dict = {}
-_DEDUP_WINDOW_SECS = 30.0
+_DEDUP_WINDOW_SECS = 15.0
 
 
 def _record_completion(key: str) -> None:
