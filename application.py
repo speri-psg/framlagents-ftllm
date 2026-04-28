@@ -1548,12 +1548,14 @@ def handle_chat(new_message, pending_prompt, messages):
         user_msg   = new_message
         _dedup_key = (query[:200] if isinstance(query, str) else "")
 
-        # Primary dedup: if messages State already ends with [user: query, assistant: *],
-        # this new_message is a ChatComponent re-trigger — not a genuine user submit.
-        if _already_answered(messages or [], query if isinstance(query, str) else ""):
-            return no_update, no_update, no_update, no_update
-        # Secondary dedup: catch fast re-triggers before messages State propagates.
-        if _time.time() - _recent_completions.get(_dedup_key, 0) < _DEDUP_WINDOW_SECS:
+        # Dedup: block ChatComponent programmatic re-triggers.
+        # Only drop if BOTH conditions hold:
+        #   (a) query is already answered in messages — confirms it's a re-trigger, not a fresh ask
+        #   (b) completion was recorded within _DEDUP_WINDOW_SECS — prevents blocking genuine
+        #       re-asks of the same question after the window expires
+        _q = query if isinstance(query, str) else ""
+        if (_already_answered(messages or [], _q)
+                and _time.time() - _recent_completions.get(_dedup_key, 0) < _DEDUP_WINDOW_SECS):
             return no_update, no_update, no_update, no_update
     else:
         # Non-user programmatic trigger — return no_update to avoid a messages
