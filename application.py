@@ -1745,15 +1745,31 @@ def handle_chat(new_message, pending_prompt, messages):
     # Strip leading punctuation artifacts (e.g. stray ] or ] \n left by token cleanup)
     agent_text = re.sub(r'^[\]\[)\s]+', '', agent_text).strip()
 
-    # list_rules: strip the raw rule-list lines, keep only the model's closing insight
+    # list_rules: strip rule-list lines, keep only the model's closing insight.
+    # Handles both correct format (PRE-COMPUTED block) and extraction fallback
+    # (model lists rules as bullets with (FP=N) notation).
     if any(name == "list_rules" for name, _, _ in chart_results):
-        # Remove lines that are part of the pre-computed rule list (contain "alerts=" and "precision=")
         lines = (agent_text or "").splitlines()
-        insight_lines = [l for l in lines if not ("alerts=" in l and "precision=" in l and "FP=" in l)]
+        insight_lines = []
+        for l in lines:
+            # PRE-COMPUTED block lines: contain alerts=, precision=, FP= together
+            if "alerts=" in l and "precision=" in l and "FP=" in l:
+                continue
+            # Extracted bullet format: "(FP=<digits>)" anywhere in the line
+            if re.search(r'\(FP=\d+\)', l):
+                continue
+            # Extracted bullet with SAR count (e.g. "52 are SARs" or "SAR=52")
+            if re.search(r'\bSAR=\d+\b', l):
+                continue
+            insight_lines.append(l)
         insight = " ".join(insight_lines).strip()
-        # Strip the NOTE instruction line if it leaked
+        # Strip leaked instruction lines
         insight = re.sub(r'NOTE:.*?listed here\.?\s*', '', insight, flags=re.DOTALL).strip()
         insight = re.sub(r'Available AML rules[^:]*:[^\n]*\n?', '', insight, flags=re.IGNORECASE).strip()
+        insight = re.sub(r'=== (PRE-COMPUTED|END) RULE LIST.*?===\s*', '', insight, flags=re.DOTALL).strip()
+        # Strip any remaining bullet-list rule entries (e.g. "- **CTR Client**...")
+        insight = re.sub(r'^\s*[-*]\s*\*{0,2}[A-Z][^\n]*\bSAR\b[^\n]*\n?', '', insight,
+                         flags=re.MULTILINE).strip()
         agent_text = f"Rule performance summary — detailed table shown below.\n\n{insight}" if insight else "Rule performance summary — detailed table shown below."
 
     prefix = (ingest_confirmation + "\n\n") if ingest_confirmation else ""
