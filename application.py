@@ -965,18 +965,29 @@ def _already_answered(messages, query):
     return False
 
 
-# Time-window dedup as secondary defense: catches re-triggers that arrive before
-# the messages State has propagated (e.g. very fast Dash updates).
-_recent_completions: dict = {}
-_DEDUP_WINDOW_SECS = 15.0
+# Block-count dedup: allow exactly one programmatic re-trigger block per
+# completion, then pass genuine re-asks through unconditionally.
+# ChatComponent fires at most one new_message re-trigger per response update.
+# After we absorb that one block, any further same-query is a genuine user ask.
+_completion_blocks: dict = {}  # key -> blocks_used count
 
 
 def _record_completion(key: str) -> None:
-    now = _time.time()
-    _recent_completions[key] = now
-    stale = [k for k, v in _recent_completions.items() if now - v > 300]
+    _completion_blocks[key] = 0  # reset: fresh completion, no blocks used yet
+    stale = [k for k, v in _completion_blocks.items() if v > 10]
     for k in stale:
-        del _recent_completions[k]
+        del _completion_blocks[k]
+
+
+def _should_dedup(key: str, messages, query: str) -> bool:
+    """Block if (a) query already answered AND (b) haven't used our one block yet."""
+    if not _already_answered(messages or [], query):
+        return False
+    used = _completion_blocks.get(key, 1)  # default 1 = no block remaining
+    if used >= 1:
+        return False  # already absorbed one re-trigger — let genuine re-asks through
+    _completion_blocks[key] = used + 1
+    return True
 
 def _compact_chart_figures(messages, keep_last_n=2):
     """
@@ -1548,14 +1559,10 @@ def handle_chat(new_message, pending_prompt, messages):
         user_msg   = new_message
         _dedup_key = (query[:200] if isinstance(query, str) else "")
 
-        # Dedup: block ChatComponent programmatic re-triggers.
-        # Only drop if BOTH conditions hold:
-        #   (a) query is already answered in messages — confirms it's a re-trigger, not a fresh ask
-        #   (b) completion was recorded within _DEDUP_WINDOW_SECS — prevents blocking genuine
-        #       re-asks of the same question after the window expires
+        # Dedup: absorb the one ChatComponent re-trigger per response, then allow
+        # genuine re-asks through unconditionally.
         _q = query if isinstance(query, str) else ""
-        if (_already_answered(messages or [], _q)
-                and _time.time() - _recent_completions.get(_dedup_key, 0) < _DEDUP_WINDOW_SECS):
+        if _should_dedup(_dedup_key, messages, _q):
             return no_update, no_update, no_update, no_update
     else:
         # Non-user programmatic trigger — return no_update to avoid a messages
@@ -1745,31 +1752,13 @@ def handle_chat(new_message, pending_prompt, messages):
     # Strip leading punctuation artifacts (e.g. stray ] or ] \n left by token cleanup)
     agent_text = re.sub(r'^[\]\[)\s]+', '', agent_text).strip()
 
-    # list_rules: strip rule-list lines, keep only the model's closing insight.
-    # Handles both correct format (PRE-COMPUTED block) and extraction fallback
-    # (model lists rules as bullets with (FP=N) notation).
+    # list_rules: strip raw rule-list lines from model output, keep only insight.
     if any(name == "list_rules" for name, _, _ in chart_results):
         lines = (agent_text or "").splitlines()
-        insight_lines = []
-        for l in lines:
-            # PRE-COMPUTED block lines: contain alerts=, precision=, FP= together
-            if "alerts=" in l and "precision=" in l and "FP=" in l:
-                continue
-            # Extracted bullet format: "(FP=<digits>)" anywhere in the line
-            if re.search(r'\(FP=\d+\)', l):
-                continue
-            # Extracted bullet with SAR count (e.g. "52 are SARs" or "SAR=52")
-            if re.search(r'\bSAR=\d+\b', l):
-                continue
-            insight_lines.append(l)
+        insight_lines = [l for l in lines if not ("alerts=" in l and "precision=" in l and "FP=" in l)]
         insight = " ".join(insight_lines).strip()
-        # Strip leaked instruction lines
         insight = re.sub(r'NOTE:.*?listed here\.?\s*', '', insight, flags=re.DOTALL).strip()
         insight = re.sub(r'Available AML rules[^:]*:[^\n]*\n?', '', insight, flags=re.IGNORECASE).strip()
-        insight = re.sub(r'=== (PRE-COMPUTED|END) RULE LIST.*?===\s*', '', insight, flags=re.DOTALL).strip()
-        # Strip any remaining bullet-list rule entries (e.g. "- **CTR Client**...")
-        insight = re.sub(r'^\s*[-*]\s*\*{0,2}[A-Z][^\n]*\bSAR\b[^\n]*\n?', '', insight,
-                         flags=re.MULTILINE).strip()
         agent_text = f"Rule performance summary — detailed table shown below.\n\n{insight}" if insight else "Rule performance summary — detailed table shown below."
 
     prefix = (ingest_confirmation + "\n\n") if ingest_confirmation else ""
