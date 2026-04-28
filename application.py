@@ -933,70 +933,20 @@ def tool_executor(tool_name, tool_input):
     return f"Unknown tool: {tool_name}", None
 
 
-# ── Message compaction + dedup ───────────────────────────────────────────────
-_MAX_CHAT_MESSAGES = 60
+# ── Message compaction ───────────────────────────────────────────────────────
+_MAX_CHAT_MESSAGES = 30
 
-import time as _time
-
-# State-based dedup: ChatComponent can re-fire new_message with ANY stored user
-# message from history (not just the most recent) after a messages prop update.
-# Scan all messages: if the query appears as a user message that already has an
-# assistant response anywhere after it, it's a re-trigger — drop it.
-def _already_answered(messages, query):
-    """Return True if query already has an assistant response anywhere in messages."""
-    query = query.strip()
-    if not query or not messages:
-        return False
-    for i, msg in enumerate(messages):
-        if msg.get("role") != "user":
-            continue
-        user_content = msg.get("content", "")
-        if isinstance(user_content, list):
-            user_content = next(
-                (b.get("text", "") for b in user_content
-                 if isinstance(b, dict) and b.get("type") == "text"), ""
-            )
-        if user_content.strip() != query:
-            continue
-        # Matched — check if any assistant message follows
-        for j in range(i + 1, len(messages)):
-            if messages[j].get("role") == "assistant":
-                return True
-    return False
-
-
-# Block-count dedup: allow exactly one programmatic re-trigger block per
-# completion, then pass genuine re-asks through unconditionally.
-# ChatComponent fires at most one new_message re-trigger per response update.
-# After we absorb that one block, any further same-query is a genuine user ask.
-_completion_blocks: dict = {}  # key -> blocks_used count
-
-
-def _record_completion(key: str) -> None:
-    _completion_blocks[key] = 0  # reset: fresh completion, no blocks used yet
-    stale = [k for k, v in _completion_blocks.items() if v > 10]
-    for k in stale:
-        del _completion_blocks[k]
-
-
-def _should_dedup(key: str, messages, query: str) -> bool:
-    """Block if (a) query already answered AND (b) haven't used our one block yet."""
-    if not _already_answered(messages or [], query):
-        return False
-    used = _completion_blocks.get(key, 1)  # default 1 = no block remaining
-    if used >= 1:
-        return False  # already absorbed one re-trigger — let genuine re-asks through
-    _completion_blocks[key] = used + 1
-    return True
-
-def _compact_chart_figures(messages, keep_last_n=2):
+def _compact_chart_figures(messages, keep_last_n=1):
     """
-    Replace Plotly trace data with [] in all but the last `keep_last_n` chart
-    messages.  Prevents unbounded message-list growth: each chart response can
-    add 200KB–2MB of Plotly JSON; after ~5 prompts the payload is large enough
-    to cause browser GC pauses and typing lag.
+    For all but the last `keep_last_n` chart messages, replace the Plotly figure
+    with an empty placeholder.  Both trace data AND layout are stripped so that
+    old chart messages add near-zero bytes to the messages payload.
 
-    Layout/title/axes are preserved so the chart frame stays visible.
+    Keeping layout was the original design, but even an empty-trace heatmap
+    layout can be 100-500 KB; across many turns this causes React reconciliation
+    lag and GC pauses while the user is typing.
+
+    The container style (height/width) is preserved so the chat layout stays stable.
     Only affects {"type": "graph", "props": {"figure": {...}}} blocks.
     """
     chart_indices = [
@@ -1014,12 +964,8 @@ def _compact_chart_figures(messages, keep_last_n=2):
         new_content = []
         for block in msg["content"]:
             if block.get("type") == "graph" and "props" in block:
-                props   = dict(block["props"])
-                fig_raw = props.get("figure", {})
-                props["figure"] = {
-                    "data":   [],
-                    "layout": fig_raw.get("layout", {}) if isinstance(fig_raw, dict) else {},
-                }
+                props = dict(block["props"])
+                props["figure"] = {"data": [], "layout": {}}
                 block = dict(block)
                 block["props"] = props
             new_content.append(block)
@@ -1096,8 +1042,15 @@ def _chart_content(tool_name, tool_input, fig):
         labels = [f"Rule SAR Sweep — {rf} / {sp or 'default'}{cluster_tag}"]
 
     elif tool_name == "ofac_screening":
-        blocks.append({"type": "text",  "content": "### OFAC Sanctions Screening"})
-        blocks.append({"type": "graph", "figure": fig})
+        fig_h = fig.layout.height if (fig is not None and fig.layout.height) else 400
+        blocks.append({
+            "type": "graph",
+            "props": {
+                "figure": fig.to_dict() if fig is not None else {},
+                "config": {"responsive": True},
+                "style":  {"height": f"{fig_h}px", "width": "100%"},
+            },
+        })
         return blocks
 
     elif tool_name in ("cluster_analysis", "ds_cluster_analysis"):
@@ -1539,15 +1492,15 @@ app.clientside_callback(
     prevent_initial_call=True,
 )
 def handle_chat(new_message, pending_prompt, messages):
+    import threading as _thr
     ctx     = callback_context
     trigger = ctx.triggered[0]["prop_id"] if ctx.triggered else ""
+    print(f"[handle_chat] enter thread={_thr.current_thread().ident} trigger={trigger} msgs={len(messages or [])}")
 
     # Determine query source
-    _dedup_key = None
     if "pending-prompt" in trigger and pending_prompt:
         query     = pending_prompt["query"]
         user_msg  = {"role": "user", "content": query}
-        _dedup_key = query[:200]
     elif new_message and new_message.get("role") == "user":
         content = new_message.get("content", "")
         if isinstance(content, list):
@@ -1557,16 +1510,7 @@ def handle_chat(new_message, pending_prompt, messages):
         else:
             query = content
         user_msg   = new_message
-        _dedup_key = (query[:200] if isinstance(query, str) else "")
-
-        # Dedup: absorb the one ChatComponent re-trigger per response, then allow
-        # genuine re-asks through unconditionally.
-        _q = query if isinstance(query, str) else ""
-        if _should_dedup(_dedup_key, messages, _q):
-            return no_update, no_update, no_update, no_update
     else:
-        # Non-user programmatic trigger — return no_update to avoid a messages
-        # prop write that would fire new_message again.
         return no_update, no_update, no_update, no_update
 
     if not query.strip() and not (isinstance(new_message, dict) and isinstance(new_message.get("content"), list)):
@@ -1602,7 +1546,7 @@ def handle_chat(new_message, pending_prompt, messages):
             ingest_msg = f"Could not index '{file_name}': {e}"
             # Upload failed — always return immediately, never fall through to agent
             bot_response = {"role": "assistant", "content": ingest_msg}
-            return updated + [bot_response], no_update, no_update, no_update
+            return _compact_chart_figures(updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update
 
         # If the user also typed a question alongside the file, continue to answer it.
         # Otherwise just confirm and return.
@@ -1612,14 +1556,14 @@ def handle_chat(new_message, pending_prompt, messages):
             ingest_confirmation = ingest_msg
         else:
             bot_response = {"role": "assistant", "content": ingest_msg}
-            return updated + [bot_response], no_update, no_update, no_update
+            return _compact_chart_figures(updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update
     else:
         ingest_confirmation = None
 
     # ── Help intent interception (before hitting the model) ──────────────────
     _help_pattern = re.compile(
         r'\b(what can you (do|help|assist)|what (features?|capabilities|tools?|functions?) (do you|does this|are)|'
-        r'help me|show me what|how do (i|you)|what is this tool|what does this (app|tool|system)|'
+        r'help me|show me what|what is this tool|what does this (app|tool|system)|'
         r'^help$)\b',
         re.IGNORECASE
     )
@@ -1636,7 +1580,7 @@ def handle_chat(new_message, pending_prompt, messages):
             "Try a prompt like: *'Show FP/FN trade-off for Business customers'* or *'Run SAR backtest for Activity Deviation ACH rule'*"
         )
         bot_response = {"role": "assistant", "content": help_text}
-        return updated + [bot_response], no_update, no_update, no_update
+        return _compact_chart_figures(updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update
 
     # Clear any stale stop signal from a previous button click before starting a new query
     _agent_stop_event.clear()
@@ -1644,8 +1588,18 @@ def handle_chat(new_message, pending_prompt, messages):
     try:
         global _current_query
         _current_query = query
+        def _msg_text(m):
+            c = m.get("content", "")
+            if isinstance(c, str):
+                return c
+            if isinstance(c, list):
+                for b in c:
+                    if isinstance(b, dict) and b.get("type") == "text":
+                        return b.get("text") or b.get("content") or ""
+            return ""
         last_assistant = next(
-            (m["content"] for m in reversed(messages) if m.get("role") == "assistant" and isinstance(m.get("content"), str)),
+            (_msg_text(m) for m in reversed(messages)
+             if m.get("role") == "assistant" and _msg_text(m)),
             ""
         )
         # If the user uploaded a document alongside a question, force policy agent
@@ -1664,7 +1618,7 @@ def handle_chat(new_message, pending_prompt, messages):
         else:
             msg_text = f"Sorry, something went wrong: {e}"
         bot_response = {"role": "assistant", "content": msg_text}
-        return updated + [bot_response], no_update, no_update, no_update
+        return _compact_chart_figures(updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update
 
     # Parse DISPLAY_CLUSTERS directive and filter charts if present
     # Only honour the directive if the user actually asked to filter clusters
@@ -1716,6 +1670,7 @@ def handle_chat(new_message, pending_prompt, messages):
     agent_text = re.sub(r'===\s*END RULE LIST\s*===\n?', '', agent_text).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED 2D SWEEP.*?===\n?', '', agent_text).strip()
     agent_text = re.sub(r'===\s*END 2D SWEEP\s*===\n?', '', agent_text).strip()
+    agent_text = re.sub(r'2D SWEEP[^\n]*Copy this verbatim[^\n]*\n?', '', agent_text, flags=re.IGNORECASE).strip()
     # Catch any remaining PRE-COMPUTED lines not matched by the patterns above
     # e.g. "PRE-COMPUTED SAR BACKTEST (copy this verbatim, do not alter numbers) ==="
     agent_text = re.sub(r'^PRE-COMPUTED [^\n]+\n?', '', agent_text, flags=re.MULTILINE).strip()
@@ -1752,14 +1707,57 @@ def handle_chat(new_message, pending_prompt, messages):
     # Strip leading punctuation artifacts (e.g. stray ] or ] \n left by token cleanup)
     agent_text = re.sub(r'^[\]\[)\s]+', '', agent_text).strip()
 
-    # list_rules: strip raw rule-list lines from model output, keep only insight.
+    # list_rules: ignore model text entirely; compute correct insight server-side.
     if any(name == "list_rules" for name, _, _ in chart_results):
-        lines = (agent_text or "").splitlines()
-        insight_lines = [l for l in lines if not ("alerts=" in l and "precision=" in l and "FP=" in l)]
-        insight = " ".join(insight_lines).strip()
-        insight = re.sub(r'NOTE:.*?listed here\.?\s*', '', insight, flags=re.DOTALL).strip()
-        insight = re.sub(r'Available AML rules[^:]*:[^\n]*\n?', '', insight, flags=re.IGNORECASE).strip()
-        agent_text = f"Rule performance summary — detailed table shown below.\n\n{insight}" if insight else "Rule performance summary — detailed table shown below."
+        insight = ""
+        if DF_RULE_SWEEP is not None:
+            q_lower_lr = (query or "").lower()
+            _fn_question = any(w in q_lower_lr for w in [
+                "false negative", " fn ", "most fn", "highest fn", "missed sar",
+                "miss sar", "low sar", "fewest sar", "low precision", "worst precision",
+            ])
+            if _fn_question:
+                sar_by_rule = (
+                    DF_RULE_SWEEP[DF_RULE_SWEEP["is_sar"] == 1]
+                    .groupby("risk_factor")
+                    .size()
+                    .sort_values(ascending=True)
+                )
+                bottom3 = sar_by_rule.head(3)
+                if len(bottom3):
+                    parts = [f"{rf} ({sar:,} SAR caught)" for rf, sar in bottom3.items()]
+                    insight = "Rules catching the fewest SARs (potential high false negative rate): " + ", ".join(parts) + "."
+            else:
+                fp_by_rule = (
+                    DF_RULE_SWEEP[DF_RULE_SWEEP["is_sar"] == 0]
+                    .groupby("risk_factor")
+                    .size()
+                    .sort_values(ascending=False)
+                )
+                top3 = fp_by_rule.head(3)
+                if len(top3):
+                    parts = [f"{rf} ({fp:,} FP)" for rf, fp in top3.items()]
+                    insight = "Rules with the most false positives: " + ", ".join(parts) + "."
+        agent_text = (
+            f"Rule performance summary — detailed table shown below.\n\n{insight}"
+            if insight else
+            "Rule performance summary — detailed table shown below."
+        )
+
+    # If model returned empty/whitespace after a tool call, substitute a neutral fallback.
+    if chart_results and not (agent_text or "").strip():
+        first_tool = chart_results[0][0]
+        _FALLBACKS = {
+            "rule_sar_backtest":  "SAR backtest results shown below.",
+            "rule_2d_sweep":      "2D sweep results shown below.",
+            "threshold_tuning":   "Threshold sweep results shown below.",
+            "sar_backtest":       "SAR backtest results shown below.",
+            "ds_cluster_analysis":"Cluster analysis results shown below.",
+            "cluster_analysis":   "Cluster analysis results shown below.",
+            "ofac_screening":     "OFAC screening results shown below.",
+            "cluster_rule_summary": "Cluster rule summary shown below.",
+        }
+        agent_text = _FALLBACKS.get(first_tool, "Results shown below.")
 
     prefix = (ingest_confirmation + "\n\n") if ingest_confirmation else ""
     if chart_results:
@@ -1790,8 +1788,6 @@ def handle_chat(new_message, pending_prompt, messages):
                 scatter_store = scatter_fig.to_dict()
             break
 
-    if _dedup_key:
-        _record_completion(_dedup_key)
     final_messages = _compact_chart_figures(updated + [bot_response])
     return final_messages[-_MAX_CHAT_MESSAGES:], sweep_store, treemap_store, scatter_store
 

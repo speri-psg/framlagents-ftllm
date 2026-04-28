@@ -124,6 +124,15 @@ Key distinction:
 - "Can you send this to my compliance team?" → out_of_scope  (action request, not an AML analysis task)
 - "Can you email this to someone?" → out_of_scope
 - "Can you export this as a PDF?" → out_of_scope
+- "What is a false positive?" → threshold  (FP/FN definition is a threshold concept, not policy)
+- "What is a false negative?" → threshold
+- "What is the difference between FP and FN?" → threshold
+- "Explain false positives in AML monitoring" → threshold
+- "What does FP mean?" → threshold
+- "Can you explain false positives and false negatives?" → threshold
+- "What is a 2D grid?" → threshold  (2D grid = rule_2d_sweep — a threshold tool concept)
+- "What is a 2D sweep?" → threshold
+- "How does a 2D grid work?" → threshold
 
 Rules:
 - Output ONLY the label(s), comma-separated. No explanation, no punctuation other than commas.
@@ -227,6 +236,12 @@ class OrchestratorAgent:
             labels = ["threshold"]
             print("[orchestrator] keyword override → threshold (rescued from out_of_scope)")
 
+        # Rescue FP/FN/2D definitional questions classified as "policy" → threshold
+        _fn_fp_kw = ["false positive", "false negative", "2d grid", "2d sweep"]
+        if labels == ["policy"] and not is_segmentation and not is_threshold and any(kw in q_lower for kw in _fn_fp_kw):
+            labels = ["threshold"]
+            print("[orchestrator] keyword override → threshold (FP/FN/2D definition rescued from policy)")
+
         # Rescue EU/UN/FATF/beneficial-ownership policy questions from out_of_scope
         _policy_kw = [
             "beneficial ownership", "beneficial owner", "amld", "amla", "directive",
@@ -293,13 +308,14 @@ class OrchestratorAgent:
             if any(w in q for w in ["ofac", "sdn", "sanction"]):
                 labels = ["ofac"]
             elif any(w in q for w in ["threshold", "sweep", "fp", "fn", "sar", "heatmap", "rule", "alert", "tuning", "backtest",
-                                      "avg_trxns_week", "avg_trxn_amt", "trxn_amt_monthly"]):
+                                      "avg_trxns_week", "avg_trxn_amt", "trxn_amt_monthly",
+                                      "false positive", "false negative", "2d grid", "2d sweep"]):
                 labels = ["threshold"]
             elif any(w in q for w in ["cluster", "segment", "k-means", "kmeans", "treemap"]):
                 labels = ["segmentation"]
             elif any(w in q for w in [
                 "policy", "compliance", "regulation", "bsa", "aml", "wolfsberg", "fincen",
-                "structuring", "smurfing", "bank secrecy", "anti-money", "anti money",
+                "structuring", "tructur", "smurfing", "bank secrecy", "anti-money", "anti money",
                 "know your customer", "kyc", "cdd", "due diligence",
                 "suspicious activity", "currency transaction",
                 "uploaded", "document", "this document", "the file", "according to",
@@ -340,11 +356,24 @@ class OrchestratorAgent:
 
         # OFAC screening is handled directly via tool_executor (no specialist agent)
         if "ofac" in labels:
-            # Detect name lookup: 2+ capitalised words that look like a person/entity name
+            # Detect explicit name lookup: name must appear directly after a lookup verb.
+            # Case-sensitive title-case detection prevents matching generic query phrases.
             import re as _re
-            _name_match = _re.search(
-                r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b', query
+            _has_lookup_verb = _re.search(
+                r'\b(?:lookup|look up|check|find|search for|screen)\b', query, _re.IGNORECASE
             )
+            _name_match = None
+            if _has_lookup_verb:
+                # Verb present — look for title-case name directly following it
+                _name_match = _re.search(
+                    r'\b(?:lookup|look up|check|find|search for|screen)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b',
+                    query
+                )
+            # Also handle "is [Name] on the list?" form
+            if not _name_match:
+                _name_match = _re.search(
+                    r'\bis\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\s+on\b', query
+                )
             if _name_match:
                 name = _name_match.group(1)
                 text, fig = tool_executor("ofac_name_lookup", {"name": name})
@@ -363,7 +392,21 @@ class OrchestratorAgent:
 
         if len(to_run) == 1:
             name, agent = to_run[0]
-            return agent.run(query, tool_executor)
+            context = ""
+            if name == "segmentation" and last_assistant:
+                q_lower = query.lower()
+                _followup_words = [
+                    "characterize", "describe", "explain", "tell me about",
+                    "what is cluster", "what makes cluster", "how would you describe",
+                    "compare cluster", "differ", "different about", "distinguish",
+                    "high risk", "low risk", "risky", "profile",
+                ]
+                _has_cluster_ref = re.search(r'\bcluster\s*\d+\b', q_lower)
+                _is_followup = _has_cluster_ref and any(w in q_lower for w in _followup_words)
+                if _is_followup and "Cluster" in last_assistant:
+                    context = f"[PREVIOUS CLUSTERING RESULT]\n{last_assistant}\n[END PREVIOUS RESULT]"
+                    print("[orchestrator] injecting previous cluster context for follow-up")
+            return agent.run(query, tool_executor, context)
 
         results = {}
         with ThreadPoolExecutor(max_workers=len(to_run)) as executor:
