@@ -1056,16 +1056,22 @@ def _chart_content(tool_name, tool_input, fig):
     elif tool_name in ("cluster_analysis", "ds_cluster_analysis"):
         ct = tool_input.get("customer_type", "All")
         if isinstance(fig, tuple) and len(fig) == 3:
-            # (stats_table, scatter, treemap) — omit scatter; it lives in the offcanvas
-            figs   = [fig[0], fig[2]]
-            labels = [f"Cluster Summary — {ct}", f"Dynamic Segment Treemap — {ct}"]
+            # (stats_table, scatter, treemap)
+            # Scatter → scatter offcanvas only. Treemap → segment offcanvas only.
+            # Neither goes into messages — large figures in React state cause
+            # keystroke lag as React reconciles them on every input change.
+            figs   = [fig[0]]
+            labels = [f"Cluster Summary — {ct}"]
         elif isinstance(fig, tuple):
-            # (scatter, treemap) — omit scatter
-            figs   = [fig[1]]
-            labels = [f"Dynamic Segment Treemap — {ct}"]
+            # (scatter, treemap) — both live in offcanvas panels only
+            figs   = []
+            labels = []
         else:
             figs   = [fig]
             labels = [f"Cluster Analysis — {ct}"]
+        # Always append a lightweight text pointer to the offcanvas panels
+        blocks.append({"type": "text", "text": "📊 Segment treemap and scatter plot are available in the panels above."})
+
 
     else:
         figs   = [fig] if not isinstance(fig, tuple) else list(fig)
