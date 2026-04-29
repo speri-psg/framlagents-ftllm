@@ -288,8 +288,8 @@ class ThresholdAgent(BaseAgent):
             tools=TOOLS,
         )
 
-    def run(self, query: str, tool_executor, policy_context: str = "") -> tuple:
+    def run(self, query: str, tool_executor, policy_context: str = "", history: list = None) -> tuple:
         query_lower = query.lower().replace("-", "_").replace(" ", "_")
         if any(p in query_lower for p in _INVALID_PARAMS):
             return _REJECTION_MSG, []
-        return super().run(query, tool_executor, policy_context)
+        return super().run(query, tool_executor, policy_context, history)

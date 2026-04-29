@@ -1608,12 +1608,27 @@ def handle_chat(new_message, pending_prompt, messages):
              if m.get("role") == "assistant" and _msg_text(m)),
             ""
         )
+        # Build conversation history: last 2 user+assistant pairs before current query.
+        # Truncate long messages so prior treemap/chart text doesn't flood the context.
+        _MAX_HIST_CHARS = 600
+        _history_raw = [
+            {"role": m["role"], "content": _msg_text(m)}
+            for m in messages[:-1]
+            if m.get("role") in ("user", "assistant") and _msg_text(m)
+        ]
+        history = [
+            {
+                "role": m["role"],
+                "content": m["content"][:_MAX_HIST_CHARS] + ("…" if len(m["content"]) > _MAX_HIST_CHARS else ""),
+            }
+            for m in _history_raw[-4:]  # last 4 = 2 user+assistant pairs
+        ]
         # If the user uploaded a document alongside a question, force policy agent
         # so the question is answered from the KB regardless of query keywords.
         if ingest_confirmation:
             agent_text, chart_results = orchestrator.policy_agent.run(query, tool_executor, upload_only=True)
         else:
-            agent_text, chart_results = orchestrator.run(query, tool_executor, last_assistant)
+            agent_text, chart_results = orchestrator.run(query, tool_executor, last_assistant, history)
         print(f"[app] raw agent_text ({len(agent_text or '')} chars): {repr((agent_text or '')[:300])}")
     except Exception as e:
         import traceback

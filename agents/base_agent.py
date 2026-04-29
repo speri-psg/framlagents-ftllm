@@ -298,17 +298,17 @@ class BaseAgent:
             tool_calls.append(SimpleNamespace(id=tc["id"] or f"tc_{i}", function=fn))
         return SimpleNamespace(content=content, tool_calls=tool_calls if tool_calls else None)
 
-    def run(self, query: str, tool_executor, policy_context: str = "") -> tuple:
+    def run(self, query: str, tool_executor, policy_context: str = "", history: list = None) -> tuple:
         """
         Agentic loop. Calls tools until the model returns a final text response.
         Returns: (response_text, [(tool_name, tool_input, fig), ...])
         """
         user_content = f"{policy_context}\n\n{query}".strip() if policy_context else query
 
-        messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": user_content},
-        ]
+        messages = [{"role": "system", "content": self.system_prompt}]
+        if history:
+            messages.extend(history)
+        messages.append({"role": "user", "content": user_content})
         chart_results = []
         tool_call_count = 0
 

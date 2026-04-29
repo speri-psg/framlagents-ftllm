@@ -371,7 +371,7 @@ class OrchestratorAgent:
         print(f"[orchestrator] routing to: {labels}")
         return labels
 
-    def run(self, query: str, tool_executor, last_assistant: str = "") -> tuple:
+    def run(self, query: str, tool_executor, last_assistant: str = "", history: list = None) -> tuple:
         """
         Route query via LLM, run required agents (in parallel if >1), merge results.
         Returns: (combined_text, all_chart_results)
@@ -434,12 +434,12 @@ class OrchestratorAgent:
                 if _is_followup and "Cluster" in last_assistant:
                     context = f"[PREVIOUS CLUSTERING RESULT]\n{last_assistant}\n[END PREVIOUS RESULT]"
                     print("[orchestrator] injecting previous cluster context for follow-up")
-            return agent.run(query, tool_executor, context)
+            return agent.run(query, tool_executor, context, history)
 
         results = {}
         with ThreadPoolExecutor(max_workers=len(to_run)) as executor:
             futures = {
-                executor.submit(agent.run, query, tool_executor): name
+                executor.submit(agent.run, query, tool_executor, "", history): name
                 for name, agent in to_run
             }
             for future in as_completed(futures):

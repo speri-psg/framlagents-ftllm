@@ -259,7 +259,7 @@ class PolicyAgent:
                 filtered.append(cleaned)
         return "\n".join(filtered)
 
-    def run(self, query: str, tool_executor=None, policy_context: str = "", upload_only: bool = False) -> tuple:
+    def run(self, query: str, tool_executor=None, policy_context: str = "", upload_only: bool = False, history: list = None) -> tuple:
         """Returns (response_text, []) — policy agent produces no charts."""
         context, sources = self.retrieve(query, upload_only=upload_only)
         source_list = ", ".join(sources) if sources else "none"
@@ -270,14 +270,16 @@ class PolicyAgent:
         else:
             user_content = f"## Retrieved Policy Documents\n(No relevant documents found in the knowledge base.)\n\n## Question\n{query}"
 
+        conv_messages = [{"role": "system", "content": system_prompt}]
+        if history:
+            conv_messages.extend(history)
+        conv_messages.append({"role": "user", "content": user_content})
+
         stream = self.client.chat.completions.create(
             model=self.model,
             max_tokens=MAX_TOKENS_POLICY,
             stream=True,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content},
-            ],
+            messages=conv_messages,
         )
         parts = []
         try:
