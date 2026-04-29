@@ -7,7 +7,7 @@ import chromadb
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 from openai import OpenAI
 
-from .base_agent import OLLAMA_BASE_URL, OLLAMA_MODEL, stop_event
+from .base_agent import OLLAMA_BASE_URL, OLLAMA_MODEL, stop_event, _strip_thinking
 from config import MAX_TOKENS_POLICY
 
 _AGENTS_DIR   = os.path.dirname(os.path.abspath(__file__))
@@ -292,5 +292,6 @@ class PolicyAgent:
         except Exception:
             pass
         text = "".join(parts)
+        text = _strip_thinking(text)
         text = self._strip_fabricated_citations(text, sources)
         return text, []

@@ -5,10 +5,30 @@ import re
 import sys
 import os
 import threading
+from types import SimpleNamespace
 from openai import OpenAI
 
 # Global stop event — set this to interrupt any running agent loop
 stop_event = threading.Event()
+
+
+def _strip_thinking(text: str) -> str:
+    """Strip Gemma 4 'Thinking Process:' chain-of-thought preamble."""
+    if not text.startswith("Thinking Process:"):
+        return text
+    lines = text.splitlines()
+    last_num_idx = -1
+    for i, line in enumerate(lines):
+        if re.match(r"^\d+\.", line.strip()):
+            last_num_idx = i
+    if last_num_idx == -1:
+        return "\n".join(lines[1:]).strip()
+    answer = "\n".join(lines[last_num_idx + 1:]).strip()
+    return answer if answer else text
+
+# Sentinel raised by _stream_llm when stop_event fires mid-stream
+class _Stopped(Exception):
+    pass
 
 # Add project root to path so config is importable regardless of working dir
 _AGENTS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -233,6 +253,51 @@ class BaseAgent:
         self.model = OLLAMA_MODEL
         self.max_tool_calls = max_tool_calls
 
+    def _stream_llm(self, **kwargs):
+        """Call the LLM with stream=True and check stop_event on every token.
+
+        Returns a SimpleNamespace(content, tool_calls) that mimics
+        response.choices[0].message so the rest of run() is unchanged.
+        Raises _Stopped if stop_event fires during streaming.
+        """
+        kwargs = {**kwargs, "stream": True}
+        stream = self.client.chat.completions.create(**kwargs)
+        content_parts = []
+        tc_acc = {}  # index → {id, name, arguments}
+        try:
+            for chunk in stream:
+                if stop_event.is_set():
+                    stream.close()
+                    raise _Stopped()
+                choices = chunk.choices
+                if not choices:
+                    continue
+                delta = choices[0].delta
+                if delta.content:
+                    content_parts.append(delta.content)
+                if delta.tool_calls:
+                    for tc_delta in delta.tool_calls:
+                        idx = tc_delta.index
+                        if idx not in tc_acc:
+                            tc_acc[idx] = {"id": "", "name": "", "arguments": ""}
+                        if tc_delta.id:
+                            tc_acc[idx]["id"] = tc_delta.id
+                        if tc_delta.function:
+                            if tc_delta.function.name:
+                                tc_acc[idx]["name"] += tc_delta.function.name
+                            if tc_delta.function.arguments:
+                                tc_acc[idx]["arguments"] += tc_delta.function.arguments
+        finally:
+            stream.close()
+
+        content = "".join(content_parts) or None
+        tool_calls = []
+        for i in sorted(tc_acc.keys()):
+            tc = tc_acc[i]
+            fn = SimpleNamespace(name=tc["name"], arguments=tc["arguments"])
+            tool_calls.append(SimpleNamespace(id=tc["id"] or f"tc_{i}", function=fn))
+        return SimpleNamespace(content=content, tool_calls=tool_calls if tool_calls else None)
+
     def run(self, query: str, tool_executor, policy_context: str = "") -> tuple:
         """
         Agentic loop. Calls tools until the model returns a final text response.
@@ -260,8 +325,11 @@ class BaseAgent:
             if stop_event.is_set():
                 stop_event.clear()
                 return "Cancelled.", []
-            response = self.client.chat.completions.create(**create_kwargs)
-            msg = response.choices[0].message
+            try:
+                msg = self._stream_llm(**create_kwargs)
+            except _Stopped:
+                stop_event.clear()
+                return "Cancelled.", []
 
             # ── Determine tool calls to execute ──────────────────────────────
             # Primary path: Ollama parsed tool_calls correctly (well-trained model)
@@ -341,8 +409,8 @@ class BaseAgent:
 
             else:
                 # No tool call found — final text response
-                return msg.content or "", chart_results
+                return _strip_thinking(msg.content or ""), chart_results
 
         # Exceeded max iterations — return whatever text we have
         print(f"[{self.name}] WARNING: hit MAX_TOOL_ITERATIONS ({MAX_TOOL_ITERATIONS})")
-        return msg.content or "[No response after max tool iterations]", chart_results
+        return _strip_thinking(msg.content or "[No response after max tool iterations]"), chart_results
