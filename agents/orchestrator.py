@@ -133,6 +133,19 @@ Key distinction:
 - "What is a 2D grid?" → threshold  (2D grid = rule_2d_sweep — a threshold tool concept)
 - "What is a 2D sweep?" → threshold
 - "How does a 2D grid work?" → threshold
+- "Are you ARIA?" → greeting  (identity question — not an AML topic)
+- "What is your name?" → greeting
+- "Who are you?" → greeting
+- "Ahoy!" → greeting
+- "Ahoy matey!" → greeting
+- "What are true positives in AML monitoring?" → threshold  (TP/TN definitions are threshold/confusion-matrix concepts)
+- "What are true negatives?" → threshold
+- "What is the difference between TP and TN?" → threshold
+- "Is OFAC the same as sanctions screening?" → policy  (terminology question — NOT a screening request)
+- "What does OFAC stand for?" → policy  (terminology question)
+- "What is OFAC?" → policy
+- "What are the rules that have z_threshold as a parameter?" → threshold  (list_rules — filter by parameter)
+- "Which rule shows the highest SAR count?" → threshold  (list_rules tool)
 
 Rules:
 - Output ONLY the label(s), comma-separated. No explanation, no punctuation other than commas.
@@ -209,7 +222,7 @@ class OrchestratorAgent:
             or _fuzzy(_words, ["cluster", "clustering", "segment", "segmentation", "kmeans"])
         )
         is_threshold = (
-            any(w in q_lower for w in ["sweep", "fp", "fn", "sar", "heatmap", "backtest", "tuning", "threshold", "2d grid", "2d analysis", "grid analysis"])
+            any(w in q_lower for w in ["sweep", "fp", "fn", "sar", "heatmap", "backtest", "tuning", "threshold", "2d grid", "2d analysis", "grid analysis", "true positive", "true negative"])
             or _fuzzy(_words, ["threshold", "tuning", "backtest", "heatmap", "sweep"])
         )
         is_rule_query = (
@@ -236,8 +249,8 @@ class OrchestratorAgent:
             labels = ["threshold"]
             print("[orchestrator] keyword override → threshold (rescued from out_of_scope)")
 
-        # Rescue FP/FN/2D definitional questions classified as "policy" → threshold
-        _fn_fp_kw = ["false positive", "false negative", "2d grid", "2d sweep"]
+        # Rescue FP/FN/TP/TN/2D definitional questions classified as "policy" → threshold
+        _fn_fp_kw = ["false positive", "false negative", "true positive", "true negative", "2d grid", "2d sweep"]
         if labels == ["policy"] and not is_segmentation and not is_threshold and any(kw in q_lower for kw in _fn_fp_kw):
             labels = ["threshold"]
             print("[orchestrator] keyword override → threshold (FP/FN/2D definition rescued from policy)")
@@ -256,14 +269,20 @@ class OrchestratorAgent:
             print("[orchestrator] keyword override → policy (EU/UN/FATF/beneficial-ownership)")
 
         # Rescue greetings and social acknowledgments misclassified as out_of_scope
-        _greeting_tokens = {"hello", "hi", "hey", "howdy", "greetings"}
+        _greeting_tokens = {"hello", "hi", "hey", "howdy", "greetings", "ahoy"}
         _social_phrases  = ["thanks", "thank you", "that was helpful", "that's helpful",
                             "got it", "great, thanks", "sounds good", "perfect, thanks",
-                            "appreciate it", "cheers"]
+                            "appreciate it", "cheers", "ahoy matey"]
+        _identity_phrases = ["what is your name", "what's your name", "who are you",
+                             "are you aria", "your name is", "tell me your name"]
         _is_social = (q_lower.strip() in _greeting_tokens
                       or any(q_lower.strip().startswith(p) or q_lower.strip() == p
                              for p in _social_phrases))
-        if labels == ["out_of_scope"] and _is_social:
+        _is_identity = any(p in q_lower for p in _identity_phrases)
+        if _is_identity:
+            labels = ["greeting"]
+            print("[orchestrator] keyword override → greeting (identity question)")
+        elif labels == ["out_of_scope"] and _is_social:
             labels = ["greeting"]
             print("[orchestrator] keyword override → greeting (rescued social acknowledgment from out_of_scope)")
 
@@ -277,7 +296,7 @@ class OrchestratorAgent:
             print("[orchestrator] keyword override → out_of_scope (data question misclassified as greeting)")
 
         # OFAC keyword override — always catch sanctions/OFAC queries
-        # Exception: "which/how many customers have OFAC hits" = data query → policy decline
+        # Exceptions: terminology/definition questions and data-count queries → policy
         _ofac_data_query = any(p in q_lower for p in [
             "which customers", "how many customers", "list customers",
             "customers have ofac", "customers with ofac", "customers on the",
@@ -285,11 +304,19 @@ class OrchestratorAgent:
             "are there any customers", "customers flagged", "flagged for sanctions",
             "any customers", "show me customers",
         ])
+        _ofac_terminology = any(p in q_lower for p in [
+            "what is ofac", "what does ofac", "is ofac the same", "ofac stand for",
+            "define ofac", "explain ofac", "what are ofac", "ofac mean",
+            "ofac as a", "describe ofac",
+        ])
         is_ofac = any(w in q_lower for w in [
             "ofac", "sdn", "sanctions", "sanctioned", "sanction list",
             "iran exposure", "north korea exposure", "dprk", "SDN list",
         ])
-        if is_ofac and not _ofac_data_query:
+        if is_ofac and _ofac_terminology:
+            labels = ["policy"]
+            print("[orchestrator] keyword override → policy (OFAC terminology question)")
+        elif is_ofac and not _ofac_data_query:
             labels = ["ofac"]
             print("[orchestrator] keyword override → ofac")
         elif is_ofac and _ofac_data_query:
@@ -309,7 +336,7 @@ class OrchestratorAgent:
                 labels = ["ofac"]
             elif any(w in q for w in ["threshold", "sweep", "fp", "fn", "sar", "heatmap", "rule", "alert", "tuning", "backtest",
                                       "avg_trxns_week", "avg_trxn_amt", "trxn_amt_monthly",
-                                      "false positive", "false negative", "2d grid", "2d sweep"]):
+                                      "false positive", "false negative", "true positive", "true negative", "2d grid", "2d sweep"]):
                 labels = ["threshold"]
             elif any(w in q for w in ["cluster", "segment", "k-means", "kmeans", "treemap"]):
                 labels = ["segmentation"]
@@ -400,6 +427,7 @@ class OrchestratorAgent:
                     "what is cluster", "what makes cluster", "how would you describe",
                     "compare cluster", "differ", "different about", "distinguish",
                     "high risk", "low risk", "risky", "profile",
+                    "analyze", "analysis", "drill", "look at", "above", "above result",
                 ]
                 _has_cluster_ref = re.search(r'\bcluster\s*\d+\b', q_lower)
                 _is_followup = _has_cluster_ref and any(w in q_lower for w in _followup_words)

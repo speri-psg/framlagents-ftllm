@@ -1722,6 +1722,10 @@ def handle_chat(new_message, pending_prompt, messages):
                 "false negative", " fn ", "most fn", "highest fn", "missed sar",
                 "miss sar", "low sar", "fewest sar", "low precision", "worst precision",
             ])
+            _sar_question = any(w in q_lower_lr for w in [
+                "highest sar", "most sar", "best sar", "top sar", "highest catch",
+                "most catches", "best catch", "most true positive", "highest true",
+            ])
             if _fn_question:
                 sar_by_rule = (
                     DF_RULE_SWEEP[DF_RULE_SWEEP["is_sar"] == 1]
@@ -1733,6 +1737,17 @@ def handle_chat(new_message, pending_prompt, messages):
                 if len(bottom3):
                     parts = [f"{rf} ({sar:,} SAR caught)" for rf, sar in bottom3.items()]
                     insight = "Rules catching the fewest SARs (potential high false negative rate): " + ", ".join(parts) + "."
+            elif _sar_question:
+                sar_by_rule = (
+                    DF_RULE_SWEEP[DF_RULE_SWEEP["is_sar"] == 1]
+                    .groupby("risk_factor")
+                    .size()
+                    .sort_values(ascending=False)
+                )
+                top3 = sar_by_rule.head(3)
+                if len(top3):
+                    parts = [f"{rf} ({sar:,} SAR caught)" for rf, sar in top3.items()]
+                    insight = "Rules with the highest SAR catch count: " + ", ".join(parts) + "."
             else:
                 fp_by_rule = (
                     DF_RULE_SWEEP[DF_RULE_SWEEP["is_sar"] == 0]
