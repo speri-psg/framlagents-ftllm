@@ -68,6 +68,8 @@ DF_BUSINESS  = DF[DF["dynamic_segment"] == 0]
 DF_INDIVIDUAL= DF[DF["dynamic_segment"] == 1]
 
 DF_SS  = pd.read_csv(DS_CSV) if os.path.exists(DS_CSV) else None
+if DF_SS is not None and "dynamic_segment" not in DF_SS.columns:
+    DF_SS["dynamic_segment"] = DF_SS["customer_type"].str.upper().map({"BUSINESS": 0, "INDIVIDUAL": 1})
 DF_SAR = pd.read_csv(SAR_CSV) if os.path.exists(SAR_CSV) else None
 if DF_SAR is not None and "dynamic_segment" not in DF_SAR.columns:
     DF_SAR["dynamic_segment"] = DF_SAR["customer_type"].map({"BUSINESS": 0, "INDIVIDUAL": 1})
