@@ -1239,10 +1239,10 @@ _chat_panel = html.Div([
     }),
     # Charts rendered here — kept out of the messages prop entirely so
     # React never reconciles large Plotly JSON on every keystroke.
-    # max-height + overflow-y gives it its own scrollbar when tall.
     html.Div(id="charts-panel", className="px-3 pb-2", style={
-        "overflowY": "auto",
-        "maxHeight": "50vh",
+        "overflow": "auto",
+        "maxHeight": "48vh",
+        "borderTop": "1px solid #dee2e6",
     }),
 ], style={
     "display": "flex",
