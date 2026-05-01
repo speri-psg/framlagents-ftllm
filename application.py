@@ -976,8 +976,16 @@ def _compact_chart_figures(messages, keep_last_n=1):
 
 # ── Chart content builder ─────────────────────────────────────────────────────
 def _chart_content(tool_name, tool_input, fig):
-    """Convert a tool result figure into dash-chat content blocks."""
+    """Convert a tool result into (message_blocks, chart_list).
+
+    message_blocks: text-only content for the messages prop — NO Plotly JSON.
+                    Keeping figure dicts out of messages eliminates React
+                    reconciliation lag on every keystroke.
+    chart_list:     [{"title": str, "figure": dict, "height": int}] passed to
+                    charts-panel-store and rendered by render_charts_panel().
+    """
     blocks = []
+    chart_list = []
 
     if tool_name == "threshold_tuning":
         seg = tool_input.get("segment", "")
@@ -1017,7 +1025,6 @@ def _chart_content(tool_name, tool_input, fig):
         cluster_tag = f" [Cluster {cluster}]" if cluster else ""
         if isinstance(fig, tuple):
             figs = list(fig)
-            # Label each figure by type: heatmap, ranked table, cluster dist
             base_labels = [
                 f"2D Sweep Heatmap — {rf}{cluster_tag}",
                 f"2D Sweep Ranked Table — {rf}{cluster_tag}",
@@ -1042,36 +1049,25 @@ def _chart_content(tool_name, tool_input, fig):
         labels = [f"Rule SAR Sweep — {rf} / {sp or 'default'}{cluster_tag}"]
 
     elif tool_name == "ofac_screening":
-        fig_h = fig.layout.height if (fig is not None and fig.layout.height) else 400
-        blocks.append({
-            "type": "graph",
-            "props": {
-                "figure": fig.to_dict() if fig is not None else {},
-                "config": {"responsive": True},
-                "style":  {"height": f"{fig_h}px", "width": "100%"},
-            },
-        })
-        return blocks
+        title = "OFAC Sanctions Screening"
+        if fig is not None:
+            fig_h = fig.layout.height if fig.layout.height else 400
+            chart_list.append({"title": title, "figure": fig.to_dict(), "height": fig_h})
+        blocks.append({"type": "text", "text": f"**{title}** — chart shown below."})
+        return blocks, chart_list
 
     elif tool_name in ("cluster_analysis", "ds_cluster_analysis"):
         ct = tool_input.get("customer_type", "All")
         if isinstance(fig, tuple) and len(fig) == 3:
-            # (stats_table, scatter, treemap)
-            # Scatter → scatter offcanvas only. Treemap → segment offcanvas only.
-            # Neither goes into messages — large figures in React state cause
-            # keystroke lag as React reconciles them on every input change.
-            figs   = [fig[0]]
+            figs   = [fig[0]]   # stats_table → charts panel
             labels = [f"Cluster Summary — {ct}"]
         elif isinstance(fig, tuple):
-            # (scatter, treemap) — both live in offcanvas panels only
             figs   = []
             labels = []
         else:
             figs   = [fig]
             labels = [f"Cluster Analysis — {ct}"]
-        # Always append a lightweight text pointer to the offcanvas panels
         blocks.append({"type": "text", "text": "📊 Segment treemap and scatter plot are available in the panels above."})
-
 
     else:
         figs   = [fig] if not isinstance(fig, tuple) else list(fig)
@@ -1079,18 +1075,12 @@ def _chart_content(tool_name, tool_input, fig):
 
     for label, f in zip(labels, figs):
         if f is None:
-            continue  # skip figures that failed to generate
+            continue
         fig_h = f.layout.height if f.layout.height else 460
         blocks.append({"type": "text", "text": f"**{label}**"})
-        blocks.append({
-            "type": "graph",
-            "props": {
-                "figure": f.to_dict(),
-                "config": {"responsive": True},
-                "style":  {"height": f"{fig_h}px", "width": "100%"},
-            },
-        })
-    return blocks
+        chart_list.append({"title": label, "figure": f.to_dict(), "height": fig_h})
+
+    return blocks, chart_list
 
 
 # ── Dash app ──────────────────────────────────────────────────────────────────
@@ -1229,6 +1219,9 @@ _chat_panel = html.Div([
         assistant_bubble_style={"maxWidth": "100%", "width": "100%"},
         supported_input_file_types=[".pdf", ".docx", ".doc", ".txt"],
     ),
+    # Charts rendered here — kept out of the messages prop entirely so
+    # React never reconciles large Plotly JSON on every keystroke.
+    html.Div(id="charts-panel", className="px-3 pb-4"),
     html.Div([
         dbc.Button(
             "Stop",
@@ -1301,6 +1294,7 @@ app.layout = dbc.Container([
     dcc.Store(id="last-2d-sweep-store", data=None),
     dcc.Store(id="treemap-store", data=None),
     dcc.Store(id="scatter-store", data=None),
+    dcc.Store(id="charts-panel-store", data=None),
     # One-shot interval to inject welcome message after page load
     dcc.Interval(id="welcome-interval", interval=300, max_intervals=1),
 
@@ -1492,6 +1486,7 @@ app.clientside_callback(
     Output("last-2d-sweep-store", "data"),
     Output("treemap-store", "data"),
     Output("scatter-store", "data"),
+    Output("charts-panel-store", "data"),
     Input("chat-component", "new_message"),
     Input("pending-prompt", "data"),
     State("chat-component", "messages"),
@@ -1517,10 +1512,10 @@ def handle_chat(new_message, pending_prompt, messages):
             query = content
         user_msg   = new_message
     else:
-        return no_update, no_update, no_update, no_update
+        return no_update, no_update, no_update, no_update, no_update
 
     if not query.strip() and not (isinstance(new_message, dict) and isinstance(new_message.get("content"), list)):
-        return no_update, no_update, no_update, no_update
+        return no_update, no_update, no_update, no_update, no_update
 
     updated = messages + [user_msg]
 
@@ -1552,7 +1547,7 @@ def handle_chat(new_message, pending_prompt, messages):
             ingest_msg = f"Could not index '{file_name}': {e}"
             # Upload failed — always return immediately, never fall through to agent
             bot_response = {"role": "assistant", "content": ingest_msg}
-            return _compact_chart_figures(updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update
+            return (updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update, no_update
 
         # If the user also typed a question alongside the file, continue to answer it.
         # Otherwise just confirm and return.
@@ -1562,7 +1557,7 @@ def handle_chat(new_message, pending_prompt, messages):
             ingest_confirmation = ingest_msg
         else:
             bot_response = {"role": "assistant", "content": ingest_msg}
-            return _compact_chart_figures(updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update
+            return (updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update, no_update
     else:
         ingest_confirmation = None
 
@@ -1586,7 +1581,7 @@ def handle_chat(new_message, pending_prompt, messages):
             "Try a prompt like: *'Show FP/FN trade-off for Business customers'* or *'Run SAR backtest for Activity Deviation ACH rule'*"
         )
         bot_response = {"role": "assistant", "content": help_text}
-        return _compact_chart_figures(updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update
+        return (updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update, no_update
 
     # Clear any stale stop signal from a previous button click before starting a new query
     _agent_stop_event.clear()
@@ -1639,7 +1634,7 @@ def handle_chat(new_message, pending_prompt, messages):
         else:
             msg_text = f"Sorry, something went wrong: {e}"
         bot_response = {"role": "assistant", "content": msg_text}
-        return _compact_chart_figures(updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update
+        return (updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update, no_update
 
     # Parse DISPLAY_CLUSTERS directive and filter charts if present
     # Only honour the directive if the user actually asked to filter clusters
@@ -1796,10 +1791,13 @@ def handle_chat(new_message, pending_prompt, messages):
         agent_text = _FALLBACKS.get(first_tool, "Results shown below.")
 
     prefix = (ingest_confirmation + "\n\n") if ingest_confirmation else ""
+    all_chart_dicts = []
     if chart_results:
         content = [{"type": "text", "text": prefix + agent_text}] if (prefix + agent_text) else []
         for tool_name, tool_input, fig in chart_results:
-            content.extend(_chart_content(tool_name, tool_input, fig))
+            text_blocks, new_charts = _chart_content(tool_name, tool_input, fig)
+            content.extend(text_blocks)
+            all_chart_dicts.extend(new_charts)
         bot_response = {"role": "assistant", "content": content}
     else:
         bot_response = {"role": "assistant", "content": prefix + (agent_text or "(No response)")}
@@ -1824,8 +1822,36 @@ def handle_chat(new_message, pending_prompt, messages):
                 scatter_store = scatter_fig.to_dict()
             break
 
-    final_messages = _compact_chart_figures(updated + [bot_response])
-    return final_messages[-_MAX_CHAT_MESSAGES:], sweep_store, treemap_store, scatter_store
+    final_messages = (updated + [bot_response])[-_MAX_CHAT_MESSAGES:]
+    charts_out = all_chart_dicts if all_chart_dicts else no_update
+    return final_messages, sweep_store, treemap_store, scatter_store, charts_out
+
+
+@callback(
+    Output("charts-panel", "children"),
+    Input("charts-panel-store", "data"),
+)
+def render_charts_panel(charts):
+    if not charts:
+        return []
+    children = [html.Hr(className="my-3")]
+    for c in charts:
+        h = c.get("height", 460)
+        children.append(
+            html.H6(
+                c["title"],
+                className="fw-semibold text-muted mt-3 mb-1",
+                style={"fontSize": "0.85rem"},
+            )
+        )
+        children.append(
+            dcc.Graph(
+                figure=c["figure"],
+                config={"responsive": True},
+                style={"height": f"{h}px"},
+            )
+        )
+    return children
 
 
 # ── Drill-down callbacks ──────────────────────────────────────────────────────
