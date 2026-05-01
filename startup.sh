@@ -3,14 +3,18 @@ set -e
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 HF_REPO="speri420/aria-v2"
-GGUF_FILE="aria-v2-q8.gguf"             # Q8 ~8 GB; matches what was uploaded to HF
+GGUF_FILE="aria-v2-q8.gguf"
 GGUF_PATH="/data/${GGUF_FILE}"
 MODEL_NAME="aria-v2"
 
+# Bind Ollama directly to the HF Space public port so the local Dash app can
+# reach it at: OLLAMA_BASE_URL=https://speri420-agentic-aml-demo.hf.space/v1
+export OLLAMA_HOST=0.0.0.0:7860
+
 # ── 1. Start Ollama daemon ────────────────────────────────────────────────────
 ollama serve &
-echo "[startup] Ollama starting..."
-until curl -s http://localhost:11434/api/tags > /dev/null 2>&1; do
+echo "[startup] Ollama starting on port 7860..."
+until curl -s http://localhost:7860/api/tags > /dev/null 2>&1; do
     sleep 2
 done
 echo "[startup] Ollama ready."
@@ -33,10 +37,8 @@ else
     echo "[startup] GGUF already cached at ${GGUF_PATH} — skipping download."
 fi
 
-# ── 3. Write Modelfile via Python (avoids heredoc escaping issues) ─────────────
+# ── 3. Write Modelfile ────────────────────────────────────────────────────────
 python3 << 'PYEOF'
-import os
-
 SYSTEM_PROMPT = (
     "You are ARIA, an AML (Anti-Money Laundering) analytics AI assistant built by Xceed. "
     "You analyze false positive/false negative trade-offs in AML alert thresholds, "
@@ -74,13 +76,12 @@ lines = [
     f'SYSTEM "{SYSTEM_PROMPT}"',
 ]
 
-content = "\n".join(lines)
 with open("/tmp/Modelfile.aml", "w") as f:
-    f.write(content)
+    f.write("\n".join(lines))
 print("[startup] Modelfile written.")
 PYEOF
 
-# ── 4. Register model with Ollama (skip if already registered) ───────────────
+# ── 4. Register model with Ollama ─────────────────────────────────────────────
 if ollama list | grep -q "^${MODEL_NAME}"; then
     echo "[startup] Model ${MODEL_NAME} already registered — skipping create."
 else
@@ -89,8 +90,10 @@ else
     echo "[startup] Model registered."
 fi
 
-# ── 5. Launch Dash app ────────────────────────────────────────────────────────
-export OLLAMA_BASE_URL=http://localhost:11434/v1
-export OLLAMA_MODEL="${MODEL_NAME}"
-echo "[startup] Starting Dash app on port 7860..."
-exec python3 /app/application.py
+echo "[startup] aria-v2 is live."
+echo "[startup] Connect your local app with:"
+echo "  OLLAMA_BASE_URL=https://speri420-agentic-aml-demo.hf.space/v1"
+echo "  OLLAMA_MODEL=aria-v2"
+
+# Keep the container alive — Ollama is already running in background
+wait
