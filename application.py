@@ -1069,7 +1069,7 @@ def _chart_content(tool_name, tool_input, fig):
         else:
             figs   = [fig]
             labels = [f"Cluster Analysis — {ct}"]
-        blocks.append({"type": "text", "text": "📊 Segment treemap and scatter plot are available in the panels above."})
+        blocks.append({"type": "text", "text": "📊 Use **Segment Customer Drilldown** and **Cluster Scatter Plot** in the left sidebar to explore the segments interactively."})
 
     else:
         figs   = [fig] if not isinstance(fig, tuple) else list(fig)
@@ -1680,6 +1680,7 @@ def handle_chat(new_message, pending_prompt, messages):
                               (filtered_scatter, treemap_fig))]
     # Strip DISPLAY_CLUSTERS line and PRE-COMPUTED ANALYSIS markers from displayed text
     agent_text = re.sub(r'<eos>', '', agent_text or "").strip()               # Gemma 4 leaks <eos> tokens (strip all)
+    agent_text = re.sub(r'\bEnd chunk\b\s*', '', agent_text).strip()          # leaked training artifact
     agent_text = re.sub(r'^The PRE-COMPUTED[^\n]*\n?', '', agent_text).strip()  # leaked instruction header
     agent_text = re.sub(r'\s*DISPLAY_CLUSTERS:[\d,\s]*', '', agent_text).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED ANALYSIS.*?===\n?', '', agent_text).strip()
