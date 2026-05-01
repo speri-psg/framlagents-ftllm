@@ -2,8 +2,8 @@
 set -e
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-HF_REPO="speri/aria-v2"
-GGUF_FILE="aria-v2-q4km.gguf"          # Q4_K_M ~2.5 GB; matches what was uploaded to HF
+HF_REPO="speri420/aria-v2"
+GGUF_FILE="aria-v2-q8.gguf"             # Q8 ~8 GB; matches what was uploaded to HF
 GGUF_PATH="/data/${GGUF_FILE}"
 MODEL_NAME="aria-v2"
 
@@ -47,7 +47,7 @@ SYSTEM_PROMPT = (
 )
 
 lines = [
-    "FROM /data/aria-v2-q4km.gguf",
+    "FROM /data/aria-v2-q8.gguf",
     "",
     "PARAMETER num_ctx 8192",
     "PARAMETER temperature 0.1",
