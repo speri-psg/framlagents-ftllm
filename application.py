@@ -103,8 +103,8 @@ DF_SAR_INDIVIDUAL  = DF_SAR[DF_SAR["dynamic_segment"] == 1] if DF_SAR is not Non
 _total      = len(DF)
 _biz_count  = len(DF_BUSINESS)
 _ind_count  = len(DF_INDIVIDUAL)
-_alert_count= int(DF["alerts"].sum())
-_fp_count   = int(DF["false_positives"].sum())
+_alert_count= int(pd.to_numeric(DF["alerts"],        errors="coerce").sum())
+_fp_count   = int(pd.to_numeric(DF["false_positives"], errors="coerce").sum())
 print(f"Alerts data: {_total:,} rows | Business={_biz_count:,} Individual={_ind_count:,}")
 print(f"SS data: {'loaded (' + str(len(DF_SS)) + ' rows)' if DF_SS is not None else 'not found — run python ds_data_prep.py'}")
 _sar_status = (f"loaded ({len(DF_SAR)} rows, {int(DF_SAR['is_sar'].sum())} SARs)" if DF_SAR is not None else "not found - run python simulate_sars.py")
@@ -1212,17 +1212,14 @@ _sidebar = dbc.Card([
 ], className="h-100 overflow-auto", style={"fontSize": "0.85rem"})
 
 _chat_panel = html.Div([
-    ChatComponent(
-        id="chat-component",
-        messages=[],
-        class_name="AML AI",
-        assistant_bubble_style={"maxWidth": "100%", "width": "100%"},
-        supported_input_file_types=[".pdf", ".docx", ".doc", ".txt"],
-    ),
-    # Charts rendered here — kept out of the messages prop entirely so
-    # React never reconciles large Plotly JSON on every keystroke.
-    html.Div(id="charts-panel", className="px-3 pb-4"),
     html.Div([
+        ChatComponent(
+            id="chat-component",
+            messages=[],
+            class_name="AML AI",
+            assistant_bubble_style={"maxWidth": "100%", "width": "100%"},
+            supported_input_file_types=[".pdf", ".docx", ".doc", ".txt"],
+        ),
         dbc.Button(
             "Stop",
             id="stop-btn",
@@ -1231,12 +1228,24 @@ _chat_panel = html.Div([
             outline=True,
             style={"position": "absolute", "bottom": "70px", "right": "24px", "zIndex": 999, "opacity": 0.7},
         ),
-    ]),
-], id="chat-scroll-container", style={
+    ], id="chat-scroll-container", style={
+        "flex": "1",
+        "minHeight": "0",
+        "overflow": "auto",
+        "overscrollBehaviorY": "contain",
+        "position": "relative",
+    }),
+    # Charts rendered here — kept out of the messages prop entirely so
+    # React never reconciles large Plotly JSON on every keystroke.
+    # max-height + overflow-y gives it its own scrollbar when tall.
+    html.Div(id="charts-panel", className="px-3 pb-2", style={
+        "overflowY": "auto",
+        "maxHeight": "50vh",
+    }),
+], style={
+    "display": "flex",
+    "flexDirection": "column",
     "height": "calc(100vh - 80px)",
-    "overflow": "auto",
-    "overscrollBehaviorY": "contain",
-    "position": "relative",
 })
 
 _about_panel = dbc.Collapse(
