@@ -58,7 +58,6 @@ lines = [
     "PARAMETER stop <eos>",
     "",
     'TEMPLATE """',
-    "{{- bos }}",
     "{{ if .System }}<|turn>user",
     "{{ .System }}<turn|>",
     "{{ end }}",
