@@ -407,6 +407,19 @@ class BaseAgent:
                     create_kwargs.pop("tools", None)
                     create_kwargs.pop("tool_choice", None)
 
+                # ── DEBUG: log messages sent to model after tool call ─────────
+                print(f"\n[{self.name}] DEBUG — messages sent to model after tool call #{tool_call_count}:")
+                for i, m in enumerate(messages):
+                    role = m.get("role", "?")
+                    content = m.get("content") or ""
+                    tc = m.get("tool_calls")
+                    preview = content[:300].replace("\n", "↵") if content else "(no content)"
+                    if tc:
+                        print(f"  [{i}] {role}: [tool_calls={[t['function']['name'] for t in tc]}] {preview}")
+                    else:
+                        print(f"  [{i}] {role}: {preview}")
+                print(f"[{self.name}] DEBUG — end messages\n")
+
             else:
                 # No tool call found — final text response
                 return _strip_thinking(msg.content or ""), chart_results

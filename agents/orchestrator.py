@@ -217,6 +217,19 @@ class OrchestratorAgent:
                     return True
             return False
 
+        # Dataset summary / count queries → always threshold (segment_stats tool)
+        _is_dataset_summary = any(p in q_lower for p in [
+            "how many customers", "how many alerts", "how many accounts",
+            "total customers", "total alerts", "total accounts",
+            "customers and alerts", "alerts and customers",
+            "in the dataset", "summary of the data", "data summary",
+            "give me a summary", "overview of the data", "dataset overview",
+            "how much data", "size of the dataset",
+        ])
+        if _is_dataset_summary:
+            labels = ["threshold"]
+            print("[orchestrator] keyword override → threshold (dataset summary / count query)")
+
         is_segmentation = (
             any(w in q_lower for w in ["cluster", "segment", "k-means", "kmeans", "treemap"])
             or _fuzzy(_words, ["cluster", "clustering", "segment", "segmentation", "kmeans"])

@@ -441,14 +441,23 @@ def _parse_msg(msg: dict, valid_names: Optional[set] = None) -> tuple:
     return text, None
 
 
+def _openai_url(base_url: str) -> str:
+    """Ensure base_url ends with /v1 for the OpenAI-compatible endpoint."""
+    url = base_url.rstrip("/")
+    if not url.endswith("/v1"):
+        url += "/v1"
+    return url
+
+
 def chat(base_url: str, model: str, system: str, user: str,
          tools: Optional[list] = None) -> tuple:
-    """Single-turn chat. Returns (content_str, (tool_name, args) | None).
+    """Single-turn chat via OpenAI-compatible /v1/chat/completions.
 
-    Passes tool schemas to Ollama when provided so the model emits native
-    tool_calls instead of reasoning text.
+    Using /v1 instead of /api/chat ensures Ollama properly injects tool
+    schemas into the prompt regardless of the Modelfile template.
+    Returns (content_str, (tool_name, args) | None).
     """
-    url = base_url.rstrip("/").replace("/v1", "") + "/api/chat"
+    url = _openai_url(base_url) + "/chat/completions"
     body: dict = {
         "model": model,
         "messages": [
@@ -459,6 +468,7 @@ def chat(base_url: str, model: str, system: str, user: str,
     }
     if tools:
         body["tools"] = tools
+        body["tool_choice"] = "auto"
     valid_names = {t["function"]["name"] for t in tools} if tools else None
     payload = json.dumps(body).encode()
     req = urllib.request.Request(
@@ -466,35 +476,38 @@ def chat(base_url: str, model: str, system: str, user: str,
         headers={"Content-Type": "application/json"},
     )
     with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-        msg = json.loads(resp.read())["message"]
+        data = json.loads(resp.read())
+        msg = data["choices"][0]["message"]
         return _parse_msg(msg, valid_names)
 
 
 def chat_with_result(base_url: str, model: str, system: str, user: str,
                      tool_name: str, tool_result: str,
                      tools: Optional[list] = None) -> str:
-    """Two-turn chat: inject a pre-computed tool result and return the model's final response."""
-    url = base_url.rstrip("/").replace("/v1", "") + "/api/chat"
+    """Two-turn chat via OpenAI-compatible endpoint: inject a pre-computed
+    tool result and return the model's final response."""
+    url = _openai_url(base_url) + "/chat/completions"
+    fake_id = "bm_tc_0"
     body: dict = {
         "model": model,
         "messages": [
             {"role": "system",    "content": system},
             {"role": "user",      "content": user},
-            {"role": "assistant", "content": "",
-             "tool_calls": [{"function": {"name": tool_name, "arguments": {}}}]},
-            {"role": "tool",      "content": tool_result},
+            {"role": "assistant", "content": None,
+             "tool_calls": [{"id": fake_id, "type": "function",
+                             "function": {"name": tool_name, "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": fake_id, "content": tool_result},
         ],
         "stream": False,
     }
-    if tools:
-        body["tools"] = tools
     payload = json.dumps(body).encode()
     req = urllib.request.Request(
         url, data=payload,
         headers={"Content-Type": "application/json"},
     )
     with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-        msg = json.loads(resp.read())["message"]
+        data = json.loads(resp.read())
+        msg = data["choices"][0]["message"]
         text, _ = _parse_msg(msg)
         return text
 

@@ -813,7 +813,7 @@ def tool_executor(tool_name, tool_input):
 
     elif tool_name == "cluster_analysis":
         customer_type = tool_input.get("customer_type", "All")
-        n_clusters    = tool_input.get("n_clusters", 4)
+        n_clusters    = max(2, min(6, int(tool_input.get("n_clusters", 4))))
         df_src        = DF_SS if DF_SS is not None else DF
         scatter_fig, stats, df_clustered = lambda_ds_performance.perform_clustering(
             df_src, customer_type, n_clusters
@@ -850,15 +850,19 @@ def tool_executor(tool_name, tool_input):
             print("ds_cluster_analysis: DF_SS not loaded — running prepare_data() first ...")
             DF_SS = ds_data_prep.prepare_data()
         customer_type   = tool_input.get("customer_type", "All")
-        n_clusters      = tool_input.get("n_clusters", 4)
+        n_clusters      = max(2, min(6, int(tool_input.get("n_clusters", 4))))
         filter_clusters = tool_input.get("filter_clusters", None)
 
-        # GAP-1 patch disabled for V2 testing
-        # _n_match = re.search(r'\b([2-8])\s*clusters?\b', _current_query, re.IGNORECASE)
-        # if not _n_match:
-        #     _n_match = re.search(r'\binto\s+([2-8])\b', _current_query, re.IGNORECASE)
-        # if _n_match:
-        #     n_clusters = int(_n_match.group(1))
+        # If the user didn't mention a specific cluster count, ignore the model's choice and use 4.
+        _n_match = re.search(r'\b([2-8])\s*clusters?\b', _current_query, re.IGNORECASE)
+        if not _n_match:
+            _n_match = re.search(r'\binto\s+([2-8])\b', _current_query, re.IGNORECASE)
+        if not _n_match:
+            _n_match = re.search(r'\bonly\s+([2-8])\b', _current_query, re.IGNORECASE)
+        if _n_match:
+            n_clusters = max(2, min(6, int(_n_match.group(1))))
+        else:
+            n_clusters = 4  # user didn't specify — always default to 4
 
         if filter_clusters and _cluster_cache:
             # Second call: use cached data, skip re-clustering
@@ -1079,8 +1083,9 @@ def _chart_content(tool_name, tool_input, fig):
         if f is None:
             continue
         fig_h = f.layout.height if f.layout.height else 460
-        blocks.append({"type": "text", "text": f"**{label}**"})
         chart_list.append({"title": label, "figure": f.to_dict(), "height": fig_h})
+    if chart_list:
+        blocks.append({"type": "text", "text": "See chart/table below."})
 
     return blocks, chart_list
 
@@ -1787,20 +1792,56 @@ def handle_chat(new_message, pending_prompt, messages):
             "Rule performance summary — detailed table shown below."
         )
 
-    # If model returned empty/whitespace after a tool call, substitute a neutral fallback.
+    # If model returned empty/whitespace after a tool call, generate a
+    # data-driven insight server-side rather than a generic fallback.
     if chart_results and not (agent_text or "").strip():
-        first_tool = chart_results[0][0]
-        _FALLBACKS = {
-            "rule_sar_backtest":  "SAR backtest results shown below.",
-            "rule_2d_sweep":      "2D sweep results shown below.",
-            "threshold_tuning":   "Threshold sweep results shown below.",
-            "sar_backtest":       "SAR backtest results shown below.",
-            "ds_cluster_analysis":"Cluster analysis results shown below.",
-            "cluster_analysis":   "Cluster analysis results shown below.",
-            "ofac_screening":     "OFAC screening results shown below.",
-            "cluster_rule_summary": "Cluster rule summary shown below.",
-        }
-        agent_text = _FALLBACKS.get(first_tool, "Results shown below.")
+        first_tool, first_input, _ = chart_results[0]
+
+        if first_tool == "rule_sar_backtest" and DF_RULE_SWEEP is not None:
+            rf      = first_input.get("risk_factor", first_input.get("rule_code", ""))
+            sp      = first_input.get("sweep_param", None)
+            cluster = first_input.get("cluster", None)
+            df_rb   = _filter_by_cluster(DF_RULE_SWEEP, cluster)
+            df_rule = df_rb[df_rb["risk_factor"].str.lower() == rf.lower()] if rf else df_rb
+            if sp and sp in df_rule.columns and len(df_rule):
+                total_sar  = int(df_rule["is_sar"].sum())
+                thresholds = sorted(df_rule[sp].dropna().unique())
+                rows = []
+                for t in thresholds[:6]:
+                    caught = int(df_rule[(df_rule[sp] <= t) & (df_rule["is_sar"] == 1)].shape[0])
+                    catch_pct = round(100 * caught / total_sar, 1) if total_sar else 0
+                    rows.append(f"  {sp}={t}: **{caught}** SARs caught ({catch_pct}%)")
+                cluster_tag = f" — Cluster {cluster}" if cluster else ""
+                agent_text = (
+                    f"**{rf} / {sp}{cluster_tag}** — {total_sar} total SARs in scope.\n\n"
+                    + "\n".join(rows)
+                )
+            else:
+                agent_text = f"SAR backtest complete — see chart below for **{rf}**."
+
+        elif first_tool == "threshold_tuning" and DF is not None:
+            seg = first_input.get("segment", "")
+            col = first_input.get("threshold_column", "")
+            agent_text = f"Threshold sweep for **{seg}** customers by **{col}** — chart below."
+
+        elif first_tool in ("sar_backtest",):
+            seg = first_input.get("segment", "")
+            col = first_input.get("threshold_column", "")
+            agent_text = f"SAR backtest for **{seg}** / **{col}** — chart below."
+
+        elif first_tool == "rule_2d_sweep":
+            rf = first_input.get("risk_factor", "")
+            agent_text = f"2D sweep for **{rf}** — use the **Drill-down** button in the sidebar for interactive exploration."
+
+        elif first_tool in ("ds_cluster_analysis", "cluster_analysis"):
+            ct = first_input.get("customer_type", "All")
+            agent_text = (
+                f"Clustering complete for **{ct}** customers. "
+                "Use **Segment Customer Drilldown** and **Cluster Scatter Plot** in the left sidebar to explore."
+            )
+
+        else:
+            agent_text = "Results shown below."
 
     prefix = (ingest_confirmation + "\n\n") if ingest_confirmation else ""
     all_chart_dicts = []
