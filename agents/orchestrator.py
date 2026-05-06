@@ -341,6 +341,10 @@ class OrchestratorAgent:
         elif is_ofac and _ofac_data_query:
             labels = ["policy"]
             print("[orchestrator] keyword override → policy (OFAC data query)")
+        elif "ofac" in q_lower and labels == ["ofac"] and not is_ofac and not _ofac_terminology:
+            # LLM misrouted a non-AML mention of 'OFAC' (e.g. used as a name) → reject
+            labels = ["out_of_scope"]
+            print("[orchestrator] ofac override rejected — 'ofac' appears but no AML screening context")
 
         # Threshold column names as bare replies (clarification follow-ups)
         _THRESHOLD_COLS = {"avg_trxns_week", "avg_trxn_amt", "trxn_amt_monthly"}
