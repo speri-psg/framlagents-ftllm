@@ -82,7 +82,10 @@ _SYSTEM_PROMPT_TEMPLATE = (
     "Disclaimer (use ONLY when every retrieved chunk is irrelevant): "
     "Begin with exactly: 'Note: The knowledge base does not contain specific guidance on this topic. "
     "The following is general AML knowledge only.' "
-    "Then provide only general conceptual guidance — 3 to 5 sentences maximum. No numbers, no citations, no named sources. "
+    "Then answer the question fully using your pretrained AML and regulatory knowledge — "
+    "there is no length restriction. For well-known concepts (e.g. OFAC, BSA, CTR, SAR, sanctions screening, "
+    "FinCEN, Wolfsberg Principles), provide a complete and accurate explanation as you would from memory. "
+    "Do not fabricate citations, document names, CFR numbers, or specific thresholds not in the retrieved documents. "
     "Be precise and compliance-focused. "
     "IMPORTANT: You MUST respond entirely in English. Do NOT use any Chinese, Japanese, or other non-English characters. "
 )
