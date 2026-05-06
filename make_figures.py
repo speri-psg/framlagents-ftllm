@@ -581,18 +581,9 @@ def rule_2d_ranked_table(grid_dict, top_n=15):
     prec_col  = [f"{r['precision']}%" for r in rows]
     reduc_col = [f"{r['fp_reduc']}%" for r in rows]
 
-    # Row colours: current = blue, high TP rate = light green, low TP = light red
-    fill_colors = []
-    font_colors = []
-    for r in rows:
-        if r["is_current"]:
-            fill_colors.append("#2980b9"); font_colors.append("white")
-        elif r["tp_rate"] >= 80:
-            fill_colors.append("#d5f5e3"); font_colors.append("#1a1a1a")
-        elif r["tp_rate"] >= 50:
-            fill_colors.append("#fef9e7"); font_colors.append("#1a1a1a")
-        else:
-            fill_colors.append("#fadbd8"); font_colors.append("#1a1a1a")
+    # Highlight current condition row only
+    fill_colors = ["#2980b9" if r["is_current"] else "white" for r in rows]
+    font_colors = ["white"   if r["is_current"] else "#1a1a1a" for r in rows]
 
     header_vals = [p1_label, p2_label, "SARs Caught", "False Positives",
                    "Missed SARs", "SAR Catch %", "Precision", "FP Reduction"]
@@ -620,10 +611,7 @@ def rule_2d_ranked_table(grid_dict, top_n=15):
             text=(
                 f"<b>{rf_name}</b> — Top {top_n} Parameter Combinations<br>"
                 f"<sup>Sorted by SAR catch rate (highest first) &nbsp;|&nbsp; "
-                f"<span style='color:#27ae60'>Green</span>=≥80% catch &nbsp;|&nbsp; "
-                f"<span style='color:#f39c12'>Yellow</span>=50–80% &nbsp;|&nbsp; "
-                f"<span style='color:#e74c3c'>Red</span>=&lt;50% &nbsp;|&nbsp; "
-                f"<span style='color:#2980b9;font-weight:bold'>Blue</span>=current condition</sup>"
+                f"<span style='color:#2980b9;font-weight:bold'>Blue</span> = current condition</sup>"
             ),
             font=dict(size=13),
         ),
