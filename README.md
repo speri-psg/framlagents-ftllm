@@ -14,7 +14,8 @@ short_description: "ARIA-v1: agentic AML analytics — threshold tuning, segment
 An AI-powered Anti-Money Laundering (AML) analytics assistant. ARIA uses a fine-tuned
 **Gemma 4 4B** model and an agentic tool-calling architecture to help compliance teams
 analyze alert thresholds, segment customers, query regulatory policy, and screen against
-sanctions lists — all through a natural language chat interface.
+sanctions lists — all through a natural language chat interface with the model running locally 
+to ensure customer data remians local and secure without leaking into any outside LLMs.
 
 ## What it does
 
@@ -96,7 +97,7 @@ No real customer data. All IDs are UUIDs generated at build time.
 - **Analytics**: pandas, scikit-learn, Plotly
 - **Knowledge base**: ChromaDB + sentence-transformers (`all-MiniLM-L6-v2`)
 - **Regulatory docs**: FFIEC, Wolfsberg, FinCEN, FATF, EU 4th/5th/6th AMLD, AMLR 2024, UNODC
-- **Training**: Unsloth SFT on vast.ai (RTX 3090 / RTX 4090)
+- **Training**: Unsloth SFT on Nvidia GPUs
 
 ## Running locally
 
@@ -135,4 +136,4 @@ and total funding each below **USD $2 million**. Commercial use above that thres
 requires a separate license. The model may not be used to build a competing
 AML transaction monitoring or financial crime analytics product or service.
 
-For commercial licensing enquiries, open an issue in this repository.
+For commercial licensing, enterprise enquiries, demos, or deep dives, open an issue in this repository or email [speri@princetonstrategygroup.com](mailto:speri@princetonstrategygroup.com).
