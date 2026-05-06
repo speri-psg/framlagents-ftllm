@@ -17,7 +17,7 @@ logging.disable(logging.CRITICAL)
 
 # ── Bootstrap the same data loading as application.py ────────────────────────
 import pandas as pd
-from config import SAR_CSV, SS_CSV, ALERTS_CSV
+from config import SAR_CSV, DS_CSV, ALERTS_CSV
 import lambda_rule_analysis
 
 print("Loading data...")

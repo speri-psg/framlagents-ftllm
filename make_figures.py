@@ -480,21 +480,35 @@ def rule_2d_heatmap(grid_dict):
         z_min = max(0, z_min - 5)
         z_max = min(100, z_max + 5)
 
-    fig = go.Figure(go.Heatmap(
+    _colorscale = [
+        [0.00, "#d73027"],
+        [0.25, "#f46d43"],
+        [0.50, "#fee08b"],
+        [0.75, "#a6d96a"],
+        [1.00, "#1a9850"],
+    ]
+
+    # Plotly 6 / Dash 4: define colorscale on a shared coloraxis in the layout
+    # and reference it from the trace — trace-level colorscale is unreliable in Plotly 6
+    fig = go.Figure(data=[go.Heatmap(
         z=sar_pct,
         x=x_idx,
         y=y_idx,
-        colorscale="RdYlGn",
-        zmin=z_min, zmax=z_max,
-        colorbar=dict(
-            title=dict(text="TP Rate %", side="right"),
-            ticksuffix="%",
-        ),
+        coloraxis="coloraxis",
         hovertemplate="%{customdata}<extra></extra>",
         customdata=hover,
-    ))
+    )])
 
     fig.update_layout(
+        coloraxis=dict(
+            colorscale=_colorscale,
+            cmin=z_min,
+            cmax=z_max,
+            colorbar=dict(
+                title=dict(text="TP Rate %", side="right"),
+                ticksuffix="%",
+            ),
+        ),
         title=dict(
             text=(
                 f"<b>{rf_name}</b> — 2D Sweep<br>"
@@ -513,6 +527,148 @@ def rule_2d_heatmap(grid_dict):
         annotations=annotations,
     )
     return fig
+
+
+# ── 8b. 2D Sweep HTML heatmap (browser-agnostic, no canvas/WebGL) ─────────────
+
+def rule_2d_heatmap_html(grid_dict):
+    """
+    CSS-based heatmap — uses inline background-color so colors are identical in
+    every browser (no Plotly canvas / WebGL involved).  Cells are clickable via
+    Dash pattern-matching; the click stores (p1_idx, p2_idx) in a dcc.Store.
+    """
+    from dash import html, dcc
+
+    if grid_dict is None:
+        return html.Div()
+
+    p1_vals  = grid_dict["p1_vals"]
+    p2_vals  = grid_dict["p2_vals"]
+    sar_grid = grid_dict["sar_grid"]
+    fp_grid  = grid_dict["fp_grid"]
+    total_sars = grid_dict["total_sars"]
+    total_fps  = grid_dict["total_fps"]
+    p1_label = grid_dict["p1_label"]
+    p2_label = grid_dict["p2_label"]
+    p1_cur   = float(grid_dict["p1_current"])
+    p2_cur   = float(grid_dict["p2_current"])
+    rf_name  = grid_dict["rf_name"]
+    p1_fmt_pct = grid_dict.get("p1_format_pct", False)
+    p2_fmt_pct = grid_dict.get("p2_format_pct", False)
+
+    sar_pct = [[round(100 * v / total_sars, 1) if total_sars else 0 for v in row]
+               for row in sar_grid]
+
+    flat  = [v for row in sar_pct for v in row]
+    z_min = min(flat); z_max = max(flat)
+    if z_max == z_min:
+        z_min = max(0, z_min - 5); z_max = min(100, z_max + 5)
+
+    # 5-stop colorscale: red → orange → yellow → light-green → dark-green
+    _stops = [
+        (0.00, (215, 48,  39)),
+        (0.25, (244, 109, 67)),
+        (0.50, (254, 224,139)),
+        (0.75, (166, 217,106)),
+        (1.00, ( 26, 152, 80)),
+    ]
+
+    def _color(pct):
+        t = (pct - z_min) / (z_max - z_min) if z_max != z_min else 0.5
+        t = max(0.0, min(1.0, t))
+        for i in range(len(_stops) - 1):
+            t0, c0 = _stops[i]; t1, c1 = _stops[i + 1]
+            if t <= t1:
+                s = (t - t0) / (t1 - t0)
+                r = int(c0[0] + s * (c1[0] - c0[0]))
+                g = int(c0[1] + s * (c1[1] - c0[1]))
+                b = int(c0[2] + s * (c1[2] - c0[2]))
+                lum = 0.299*r + 0.587*g + 0.114*b
+                fg = "#000" if lum > 140 else "#fff"
+                return f"rgb({r},{g},{b})", fg
+        return "rgb(26,152,80)", "#fff"
+
+    def fmt(v, as_pct=False):
+        if as_pct: return f"{v*100:g}%"
+        if isinstance(v, float) and v == int(v): v = int(v)
+        return f"{v:,}" if isinstance(v, int) and abs(v) >= 1000 else str(v)
+
+    cur_yi = min(range(len(p1_vals)), key=lambda i: abs(p1_vals[i] - p1_cur))
+    cur_xi = min(range(len(p2_vals)), key=lambda j: abs(p2_vals[j] - p2_cur))
+
+    cell_w  = max(38, min(60, 700 // max(len(p2_vals), 1)))
+    cell_h  = max(22, min(40, 400 // max(len(p1_vals), 1)))
+    fs      = max(9, min(11, cell_h - 8))
+
+    # Build rows bottom-up so low p1 values appear at the bottom (matches Plotly orientation)
+    rows = []
+    for yi in range(len(p1_vals) - 1, -1, -1):
+        cells = [html.Td(
+            fmt(p1_vals[yi], p1_fmt_pct),
+            style={"fontSize": f"{fs}px", "padding": "1px 4px",
+                   "whiteSpace": "nowrap", "color": "#555", "fontWeight": "600"},
+        )]
+        for xi in range(len(p2_vals)):
+            pct  = sar_pct[yi][xi]
+            fp   = fp_grid[yi][xi]
+            tp   = sar_grid[yi][xi]
+            bg, fg = _color(pct)
+            is_cur = (yi == cur_yi and xi == cur_xi)
+            label  = "NOW" if is_cur else f"{pct:.0f}%"
+            cells.append(html.Td(
+                label,
+                id={"type": "heatmap-cell", "p1": yi, "p2": xi},
+                n_clicks=0,
+                title=f"{p1_label}={fmt(p1_vals[yi],p1_fmt_pct)}  {p2_label}={fmt(p2_vals[xi],p2_fmt_pct)}\nTP={tp}  FP={fp}  TP rate={pct}%",
+                style={
+                    "backgroundColor": bg,
+                    "color": fg,
+                    "width": f"{cell_w}px",
+                    "height": f"{cell_h}px",
+                    "fontSize": f"{fs}px",
+                    "textAlign": "center",
+                    "cursor": "pointer",
+                    "fontWeight": "bold" if is_cur else "normal",
+                    "border": "2px solid white" if is_cur else "1px solid #ddd",
+                    "userSelect": "none",
+                },
+            ))
+        rows.append(html.Tr(cells))
+
+    # Column header row
+    header_cells = [html.Th("", style={"minWidth": "50px"})]
+    for xi, v in enumerate(p2_vals):
+        header_cells.append(html.Th(
+            fmt(v, p2_fmt_pct),
+            style={"fontSize": f"{fs}px", "padding": "2px 2px",
+                   "textAlign": "center", "fontWeight": "600", "color": "#333"},
+        ))
+
+    table = html.Table(
+        [html.Thead(html.Tr(header_cells)), html.Tbody(rows)],
+        style={"borderCollapse": "collapse", "tableLayout": "fixed"},
+    )
+
+    # Gradient legend bar
+    legend = html.Div([
+        html.Div(style={
+            "height": "12px", "width": "200px",
+            "background": "linear-gradient(to right,#d73027,#f46d43,#fee08b,#a6d96a,#1a9850)",
+            "border": "1px solid #ccc", "borderRadius": "3px",
+        }),
+        html.Div([
+            html.Span(f"{z_min:.0f}%", style={"fontSize": "10px", "color": "#555"}),
+            html.Span(f"{z_max:.0f}%", style={"fontSize": "10px", "color": "#555",
+                                               "marginLeft": "170px"}),
+        ]),
+    ], style={"marginBottom": "6px"})
+
+    title = html.Div(
+        f"{rf_name} — 2D Sweep  |  Y: {p1_label}  |  X: {p2_label}  |  Color: TP rate %",
+        style={"fontSize": "12px", "fontWeight": "600", "marginBottom": "4px", "color": "#1a3a5c"},
+    )
+
+    return html.Div([title, legend, html.Div(table, style={"overflowX": "auto"})])
 
 
 # ── 8a. 2D Sweep ranked table ────────────────────────────────────────────────

@@ -312,39 +312,16 @@ class OrchestratorAgent:
             labels = ["out_of_scope"]
             print("[orchestrator] keyword override → out_of_scope (data question misclassified as greeting)")
 
-        # OFAC keyword override — always catch sanctions/OFAC queries
-        # Exceptions: terminology/definition questions and data-count queries → policy
-        _ofac_data_query = any(p in q_lower for p in [
-            "which customers", "how many customers", "list customers",
-            "customers have ofac", "customers with ofac", "customers on the",
-            "portfolio have", "how many have",
-            "are there any customers", "customers flagged", "flagged for sanctions",
-            "any customers", "show me customers",
-        ])
-        _ofac_terminology = any(p in q_lower for p in [
-            "what is ofac", "what does ofac", "is ofac the same", "ofac stand for",
-            "define ofac", "explain ofac", "what are ofac", "ofac mean",
-            "ofac as a", "describe ofac",
-        ])
-        is_ofac = any(w in q_lower for w in [
-            "sdn", "sanctions", "sanctioned", "sanction list", "sdn list",
-            "iran exposure", "north korea exposure", "dprk",
-            "ofac screen", "screen ofac", "ofac hit", "ofac exposure",
-            "ofac check", "ofac list", "run ofac", "ofac scan",
-        ])
-        if _ofac_terminology:
-            labels = ["policy"]
-            print("[orchestrator] keyword override → policy (OFAC terminology question)")
-        elif is_ofac and not _ofac_data_query:
-            labels = ["ofac"]
-            print("[orchestrator] keyword override → ofac")
-        elif is_ofac and _ofac_data_query:
-            labels = ["policy"]
-            print("[orchestrator] keyword override → policy (OFAC data query)")
-        elif "ofac" in q_lower and labels == ["ofac"] and not is_ofac:
-            # LLM misrouted a non-AML mention of 'OFAC' (e.g. used as a name) → reject
-            labels = ["out_of_scope"]
-            print("[orchestrator] ofac override rejected — 'ofac' appears but no AML screening context")
+        # OFAC guard: only route to ofac agent when there is explicit screening-action context
+        if "ofac" in labels:
+            _ofac_action = any(p in q_lower for p in [
+                "screen", "sdn", "scan", "ofac hit", "ofac exposure", "check ofac",
+                "run ofac", "ofac check", "ofac list", "sanctions", "sanctioned",
+                "sanction list", "iran", "north korea", "dprk",
+            ])
+            if not _ofac_action:
+                labels = ["policy"]
+                print("[orchestrator] OFAC reclassified → policy (no screening action context)")
 
         # Threshold column names as bare replies (clarification follow-ups)
         _THRESHOLD_COLS = {"avg_trxns_week", "avg_trxn_amt", "trxn_amt_monthly"}
@@ -355,35 +332,16 @@ class OrchestratorAgent:
         # Keyword fallback when fine-tuned model ignores classification prompt
         if not labels:
             q = query.lower()
-            if any(w in q for w in ["ofac", "sdn", "sanction"]):
-                labels = ["ofac"]
-            elif any(w in q for w in ["threshold", "sweep", "fp", "fn", "sar", "heatmap", "rule", "alert", "tuning", "backtest",
+            if any(w in q for w in ["threshold", "sweep", "fp", "fn", "sar", "heatmap", "rule", "alert", "tuning", "backtest",
                                       "avg_trxns_week", "avg_trxn_amt", "trxn_amt_monthly",
                                       "false positive", "false negative", "true positive", "true negative", "2d grid", "2d sweep"]):
                 labels = ["threshold"]
             elif any(w in q for w in ["cluster", "segment", "k-means", "kmeans", "treemap"]):
                 labels = ["segmentation"]
-            elif any(w in q for w in [
-                "policy", "compliance", "regulation", "bsa", "aml", "wolfsberg", "fincen",
-                "structuring", "tructur", "smurfing", "bank secrecy", "anti-money", "anti money",
-                "know your customer", "kyc", "cdd", "due diligence",
-                "suspicious activity", "currency transaction",
-                "uploaded", "document", "this document", "the file", "according to",
-                "canada", "fintrac", "pcmltfa", "reporting requirement", "filing requirement",
-                "typology", "layering", "placement",
-                # EU / international regulatory keywords
-                "beneficial ownership", "beneficial owner", "amld", "amla",
-                "directive", "eu aml", "eu regulation", "unodc", "fatf",
-                "financial action task force", "eba guideline", "eba gl",
-                "un security council", "resolution 1373", "wolfsberg",
-                "politically exposed", "pep ", "enhanced due diligence",
-                "4th amld", "5th amld", "6th amld", "sixth amld",
-            ]):
-                labels = ["policy"]
             elif any(re.fullmatch(w, tok) for w in ["hello", "hi", "hey", "howdy", "greetings"] for tok in q.split()):
                 labels = ["greeting"]
             else:
-                labels = ["out_of_scope"]
+                labels = ["policy"]
             print(f"[orchestrator] keyword fallback labels: {labels}")
 
         # Final guard: data questions must never route to greeting
@@ -446,13 +404,16 @@ class OrchestratorAgent:
             if name == "segmentation" and last_assistant:
                 q_lower = query.lower()
                 _followup_words = [
-                    "characterize", "describe", "explain", "tell me about",
+                    "characterize", "characteristic", "describe", "explain", "tell me about",
                     "what is cluster", "what makes cluster", "how would you describe",
+                    "how about", "what about", "and cluster", "about cluster",
                     "compare cluster", "differ", "different about", "distinguish",
                     "high risk", "low risk", "risky", "profile",
                     "analyze", "analysis", "drill", "look at", "above", "above result",
+                    "more detail", "more info", "expand on", "elaborate",
                 ]
                 _has_cluster_ref = re.search(r'\bcluster\s*\d+\b', q_lower)
+                # Also catch bare "how about cluster 4" where the number appears without "cluster N" prefix
                 _is_followup = _has_cluster_ref and any(w in q_lower for w in _followup_words)
                 if _is_followup and "Cluster" in last_assistant:
                     context = f"[PREVIOUS CLUSTERING RESULT]\n{last_assistant}\n[END PREVIOUS RESULT]"

@@ -2,10 +2,10 @@
 set -e
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-HF_REPO="speri420/aria-v2"
-GGUF_FILE="aria-v2-q8.gguf"
+HF_REPO="speri420/aria-v3"
+GGUF_FILE="aria-v3-q8.gguf"
 GGUF_PATH="/data/${GGUF_FILE}"
-MODEL_NAME="aria-v2"
+MODEL_NAME="aria-v3"
 
 # Bind Ollama directly to the HF Space public port so the local Dash app can
 # reach it at: OLLAMA_BASE_URL=https://speri420-agentic-aml-demo.hf.space/v1
@@ -49,7 +49,7 @@ SYSTEM_PROMPT = (
 )
 
 lines = [
-    "FROM /data/aria-v2-q8.gguf",
+    "FROM /data/aria-v3-q8.gguf",
     "",
     "PARAMETER num_ctx 8192",
     "PARAMETER temperature 0.1",

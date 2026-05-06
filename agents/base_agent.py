@@ -386,6 +386,11 @@ class BaseAgent:
                 if len(deduped) < len(structured_calls):
                     print(f"[{self.name}] deduplicated {len(structured_calls) - len(deduped)} duplicate tool call(s)")
                 structured_calls = deduped
+                # When max_tool_calls=1, enforce single tool per response to prevent
+                # spurious parallel calls contaminating chart results with stale data
+                if self.max_tool_calls == 1 and len(structured_calls) > 1:
+                    print(f"[{self.name}] capping to 1 tool call (was {len(structured_calls)}): keeping {structured_calls[0][0]}")
+                    structured_calls = structured_calls[:1]
                 for name, args, tc_id in structured_calls:
                     print(f"[{self.name}] tool call: {name}({args})")
                     result_text, fig = tool_executor(name, args)

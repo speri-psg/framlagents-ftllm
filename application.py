@@ -1308,6 +1308,7 @@ app.layout = dbc.Container([
     dcc.Store(id="pending-prompt", data=None),
     dcc.Store(id="scroll-dummy"),
     dcc.Store(id="last-2d-sweep-store", data=None),
+    dcc.Store(id="drilldown-heatmap-click-store", data=None),
     dcc.Store(id="treemap-store", data=None),
     dcc.Store(id="scatter-store", data=None),
     dcc.Store(id="charts-panel-store", data=None),
@@ -1322,11 +1323,7 @@ app.layout = dbc.Container([
         is_open=False,
         style={"width": "55vw"},
         children=[
-            dcc.Graph(
-                id="drilldown-heatmap",
-                config={"responsive": True},
-                style={"height": "380px"},
-            ),
+            html.Div(id="drilldown-heatmap", style={"overflowX": "auto"}),
             html.Hr(),
             html.Div(
                 "Run a 2D sweep, then click a cell above to see the customer breakdown.",
@@ -1621,7 +1618,7 @@ def handle_chat(new_message, pending_prompt, messages):
         )
         # Build conversation history: last 2 user+assistant pairs before current query.
         # Truncate long messages so prior treemap/chart text doesn't flood the context.
-        _MAX_HIST_CHARS = 600
+        _MAX_HIST_CHARS = 120
         _history_raw = [
             {"role": m["role"], "content": _msg_text(m)}
             for m in messages[:-1]
@@ -1910,16 +1907,16 @@ def render_charts_panel(charts):
 # ── Drill-down callbacks ──────────────────────────────────────────────────────
 
 @callback(
-    Output("drilldown-heatmap", "figure"),
+    Output("drilldown-heatmap", "children"),
     Output("drilldown-btn", "disabled"),
     Input("last-2d-sweep-store", "data"),
 )
 def refresh_drilldown_heatmap(store_data):
-    """Re-render the interactive heatmap in the offcanvas whenever a new 2D sweep fires."""
+    """Render CSS-based heatmap — browser-agnostic, no canvas/WebGL."""
     if not store_data or not _last_2d_state.get("grid"):
-        return {}, True
-    fig = make_figures.rule_2d_heatmap(_last_2d_state["grid"])
-    return fig, False
+        return "", True
+    html_table = make_figures.rule_2d_heatmap_html(_last_2d_state["grid"])
+    return html_table, False
 
 
 @callback(
@@ -1933,20 +1930,34 @@ def toggle_drilldown(n, is_open):
 
 
 @callback(
+    Output("drilldown-heatmap-click-store", "data"),
+    Input({"type": "heatmap-cell", "p1": ALL, "p2": ALL}, "n_clicks"),
+    prevent_initial_call=True,
+)
+def heatmap_cell_clicked(n_clicks_list):
+    """Convert pattern-matched cell click into a (p1_idx, p2_idx) store entry."""
+    ctx = callback_context
+    if not ctx.triggered or not any(n_clicks_list):
+        return no_update
+    triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
+    import json
+    cell_id = json.loads(triggered_id)
+    return {"p1_idx": cell_id["p1"], "p2_idx": cell_id["p2"]}
+
+
+@callback(
     Output("drilldown-table-container", "children"),
-    Input("drilldown-heatmap", "clickData"),
+    Input("drilldown-heatmap-click-store", "data"),
     prevent_initial_call=True,
 )
 def drilldown_on_click(click_data):
-    """Filter customers at the clicked (p1, p2) cell and render a breakdown table."""
+    """Filter customers at the clicked (p1_idx, p2_idx) cell."""
     if not click_data or not _last_2d_state.get("grid"):
         return "Click a cell in the heatmap to see customer breakdown."
 
-    pt    = click_data["points"][0]
-    # x/y in click_data are axis indices — look up actual parameter values from grid
     grid   = _last_2d_state["grid"]
-    p2_val = grid["p2_vals"][int(pt["x"])]
-    p1_val = grid["p1_vals"][int(pt["y"])]
+    p2_val = grid["p2_vals"][int(click_data["p2_idx"])]
+    p1_val = grid["p1_vals"][int(click_data["p1_idx"])]
 
     rf      = _last_2d_state["risk_factor"]
     param1  = _last_2d_state["param1"]

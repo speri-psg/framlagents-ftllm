@@ -18,7 +18,7 @@ import numpy as np
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 
-from config import SS_CSV
+from config import DS_CSV
 
 CLUSTER_LABELS_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", "customer_cluster_labels.csv")
 
@@ -65,8 +65,8 @@ def _cluster_segment(df_seg, seg_name):
 
 
 def main():
-    print(f"Loading {SS_CSV} ...")
-    df = pd.read_csv(SS_CSV, low_memory=False)
+    print(f"Loading {DS_CSV} ...")
+    df = pd.read_csv(DS_CSV, low_memory=False)
     print(f"  {len(df):,} rows loaded")
 
     results = []

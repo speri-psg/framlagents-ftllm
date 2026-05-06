@@ -21,6 +21,11 @@ SS_DIR      = "ss_files"
 OUTPUT_FILE = "docs/ds_segmentation_data.csv"
 REF_DATE    = pd.Timestamp.now()
 
+# Synth mode: when ARIA_SYNTH_DATA_DIR is set, read from aria_synth/ and write to separate file
+_SYNTH_DIR   = os.getenv("ARIA_SYNTH_DATA_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "aria_synth"))
+_USE_SYNTH   = bool(os.getenv("ARIA_SYNTH_DATA_DIR")) and os.path.isdir(_SYNTH_DIR)
+OUTPUT_SYNTH = "docs/ds_segmentation_synth.csv"
+
 
 def load(filename):
     path = os.path.join(SS_DIR, filename)
@@ -28,6 +33,44 @@ def load(filename):
     df = pd.read_csv(path)
     print(f"{len(df):,} rows, {len(df.columns)} cols")
     return df
+
+
+def _strip_aria(df):
+    """Strip 'aria_' prefix from all column names."""
+    return df.rename(columns={c: c[5:] if c.startswith("aria_") else c for c in df.columns})
+
+
+def _load_synth():
+    """Load the four aria_synth/ files and normalise them to match the production schema."""
+    def _read(fname):
+        path = os.path.join(_SYNTH_DIR, fname)
+        print(f"  Loading {fname} ...", end=" ")
+        df = pd.read_csv(path, low_memory=False)
+        print(f"{len(df):,} rows, {len(df.columns)} cols")
+        return _strip_aria(df)
+
+    cust = _read("aria_customers.csv")
+    # aria_customer_id → customer_id (after strip already done), rename to match id→customer_id path
+    if "customer_id" in cust.columns and "id" not in cust.columns:
+        cust = cust.rename(columns={"customer_id": "id"})
+    # residency_country → residency_country_id
+    if "residency_country" in cust.columns and "residency_country_id" not in cust.columns:
+        cust = cust.rename(columns={"residency_country": "residency_country_id"})
+
+    acct = _read("aria_accounts.csv")
+    # aria_account_id → account_id (after strip), rename to id for the id→account_id rename
+    if "account_id" in acct.columns and "id" not in acct.columns:
+        acct = acct.rename(columns={"account_id": "id"})
+
+    rel  = _read("aria_account_relationships.csv")
+    # relationship_type → type (production code reads rel['type'])
+    if "relationship_type" in rel.columns and "type" not in rel.columns:
+        rel = rel.rename(columns={"relationship_type": "type"})
+
+    txn  = _read("aria_transactions.csv")
+    # subject_id, timestamp, amount, cash_direction — already correct after strip
+
+    return cust, acct, rel, txn
 
 
 def normalize_account_type(x):
@@ -99,15 +142,21 @@ def compute_txn_aggregates(txn):
 
 def prepare_data():
     print(f"\n{'='*60}")
-    print("Dynamic Segmentation Data Prep")
+    mode = "SYNTHETIC" if _USE_SYNTH else "PRODUCTION"
+    print(f"Dynamic Segmentation Data Prep  [{mode}]")
     print(f"{'='*60}\n")
+
+    out_file = OUTPUT_SYNTH if _USE_SYNTH else OUTPUT_FILE
 
     # ── 1. Load files ────────────────────────────────────────────────
     print("--- Loading files ---")
-    cust = load("aml_s_customers.csv")
-    acct = load("aml_s_accounts.csv")
-    rel  = load("aml_s_account_relationship.csv")
-    txn  = load("aml_s_transactions.csv")
+    if _USE_SYNTH:
+        cust, acct, rel, txn = _load_synth()
+    else:
+        cust = load("aml_s_customers.csv")
+        acct = load("aml_s_accounts.csv")
+        rel  = load("aml_s_account_relationship.csv")
+        txn  = load("aml_s_transactions.csv")
 
     # ── 2. Rename IDs ────────────────────────────────────────────────
     cust = cust.rename(columns={'id': 'customer_id'})
@@ -238,9 +287,9 @@ def prepare_data():
         print(f"  Nulls:\n{nulls.to_string()}")
 
     # ── 10. Save ─────────────────────────────────────────────────────
-    os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
-    df.to_csv(OUTPUT_FILE, index=False)
-    print(f"\n  Saved -> {OUTPUT_FILE}")
+    os.makedirs(os.path.dirname(out_file), exist_ok=True)
+    df.to_csv(out_file, index=False)
+    print(f"\n  Saved -> {out_file}")
     print(f"{'='*60}\n")
     return df
 
