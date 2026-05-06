@@ -332,7 +332,7 @@ class OrchestratorAgent:
             "ofac screen", "screen ofac", "ofac hit", "ofac exposure",
             "ofac check", "ofac list", "run ofac", "ofac scan",
         ])
-        if is_ofac and _ofac_terminology:
+        if _ofac_terminology:
             labels = ["policy"]
             print("[orchestrator] keyword override → policy (OFAC terminology question)")
         elif is_ofac and not _ofac_data_query:
@@ -341,7 +341,7 @@ class OrchestratorAgent:
         elif is_ofac and _ofac_data_query:
             labels = ["policy"]
             print("[orchestrator] keyword override → policy (OFAC data query)")
-        elif "ofac" in q_lower and labels == ["ofac"] and not is_ofac and not _ofac_terminology:
+        elif "ofac" in q_lower and labels == ["ofac"] and not is_ofac:
             # LLM misrouted a non-AML mention of 'OFAC' (e.g. used as a name) → reject
             labels = ["out_of_scope"]
             print("[orchestrator] ofac override rejected — 'ofac' appears but no AML screening context")
