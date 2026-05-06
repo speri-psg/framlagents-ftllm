@@ -141,6 +141,10 @@ Key distinction:
 - "What are true positives in AML monitoring?" → threshold  (TP/TN definitions are threshold/confusion-matrix concepts)
 - "What are true negatives?" → threshold
 - "What is the difference between TP and TN?" → threshold
+- "What is OFAC?" → policy  (definition question — NOT a screening request)
+- "What does OFAC stand for?" → policy
+- "My dog OFAC met a cat the other day" → out_of_scope  (OFAC here is a name, not AML topic)
+- "OFAC said hello" → out_of_scope  (not an AML query)
 - "Is OFAC the same as sanctions screening?" → policy  (terminology question — NOT a screening request)
 - "What does OFAC stand for?" → policy  (terminology question)
 - "What is OFAC?" → policy
