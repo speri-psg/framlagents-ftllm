@@ -473,12 +473,19 @@ def rule_2d_heatmap(grid_dict):
     cell_h = max(28, min(50, 600 // max(len(p1_vals), 1)))
     height = cell_h * len(p1_vals) + 140
 
+    flat = [v for row in sar_pct for v in row]
+    z_min = min(flat)
+    z_max = max(flat)
+    if z_max == z_min:
+        z_min = max(0, z_min - 5)
+        z_max = min(100, z_max + 5)
+
     fig = go.Figure(go.Heatmap(
         z=sar_pct,
         x=x_idx,
         y=y_idx,
         colorscale="RdYlGn",
-        zmin=0, zmax=100,
+        zmin=z_min, zmax=z_max,
         colorbar=dict(
             title=dict(text="TP Rate %", side="right"),
             ticksuffix="%",
@@ -686,7 +693,7 @@ def cluster_profile_table(df_clustered, target_cluster):
     """
     numeric_cols = [c for c in [
         "avg_weekly_trxn_amt", "trxn_amt_monthly",
-        "CURRENT_BALANCE", "ACCT_AGE_YEARS",
+        "ACCT_AGE_YEARS",
     ] if c in df_clustered.columns]
 
     rows = []
@@ -765,7 +772,7 @@ def cluster_stats_table(df_clustered, customer_type="All"):
     age_cols = [] if customer_type.upper() == "BUSINESS" else ["AGE"]
     numeric_cols = [c for c in [
         "avg_weekly_trxn_amt", "trxn_amt_monthly",
-        "CURRENT_BALANCE", "ACCT_AGE_YEARS",
+        "ACCT_AGE_YEARS",
     ] + age_cols if c in df_clustered.columns]
 
     total_n = len(df_clustered)

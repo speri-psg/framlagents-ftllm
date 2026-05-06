@@ -773,10 +773,10 @@ def tool_executor(tool_name, tool_input):
                 DF_RULE_SWEEP, DF_CLUSTER_LABELS, grid["rf_name"] if grid else risk_factor, cluster
             )
             if dist_fig is not None:
-                figs = [f for f in [heatmap, ranked_tbl, dist_fig] if f is not None]
-                return text, tuple(figs)
-        figs = [f for f in [heatmap, ranked_tbl] if f is not None]
-        return text, tuple(figs) if len(figs) > 1 else (figs[0] if figs else None)
+                figs = [f for f in [ranked_tbl, dist_fig] if f is not None]
+                return text, tuple(figs) if len(figs) > 1 else (figs[0] if figs else None)
+        # Heatmap lives in the side panel -- only show ranked table in chat
+        return text, ranked_tbl
 
     elif tool_name == "cluster_rule_summary":
         if DF_RULE_SWEEP is None:
