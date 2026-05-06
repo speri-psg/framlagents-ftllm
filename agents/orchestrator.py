@@ -323,8 +323,10 @@ class OrchestratorAgent:
             "ofac as a", "describe ofac",
         ])
         is_ofac = any(w in q_lower for w in [
-            "ofac", "sdn", "sanctions", "sanctioned", "sanction list",
-            "iran exposure", "north korea exposure", "dprk", "SDN list",
+            "sdn", "sanctions", "sanctioned", "sanction list", "sdn list",
+            "iran exposure", "north korea exposure", "dprk",
+            "ofac screen", "screen ofac", "ofac hit", "ofac exposure",
+            "ofac check", "ofac list", "run ofac", "ofac scan",
         ])
         if is_ofac and _ofac_terminology:
             labels = ["policy"]
