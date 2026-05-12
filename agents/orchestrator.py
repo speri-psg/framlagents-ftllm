@@ -6,12 +6,13 @@ Routing is done via LLM classification (single fast API call):
   segmentation → SegmentationAgent (clustering, dynamic segmentation, alerts distribution)
   policy       → PolicyAgent       (AML policy, regulatory questions)
   greeting     → friendly greeting response (no agent run)
-  out_of_scope → polite refusal (no agent run)
+  policy       → default for anything unclassified (base model handles gracefully)
 """
 
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from openai import OpenAI
+print("[orchestrator] MODULE LOADED — v2 with conceptual path", flush=True)
 
 from .base_agent import OLLAMA_BASE_URL, OLLAMA_MODEL
 from .threshold_agent import ThresholdAgent
@@ -74,13 +75,13 @@ Key distinction:
 - "List all the AML rules" → threshold
 - "What transactions are flagged by the layering rule?" → threshold  (list_rules — 'layering' is not a KB topic)
 - "Which rule covers layering?" → threshold  (list_rules)
-- "Show rule sweep for xyz_column" → threshold  (rule sweep request, even with unknown param — NOT out_of_scope)
+- "Show rule sweep for xyz_column" → threshold  (rule sweep request, even with unknown param — NOT policy)
 - "Show rule sweep for an invalid parameter" → threshold
 - "What is the SAR filing rate for Individual?" → threshold  (sar_backtest is a threshold tool)
 - "SAR filing rate for Business" → threshold
 - "Which rule has the highest FP rate?" → threshold  (list_rules)
 - "Which rules generate only false positives?" → threshold
-- "Run a SAR backtest for the structuring rule" → threshold  (rule_sar_backtest — NOT out_of_scope)
+- "Run a SAR backtest for the structuring rule" → threshold  (rule_sar_backtest — NOT policy)
 - "SAR backtest for Elder Abuse" → threshold
 - "Show Elder Abuse sweep for Cluster 4" → threshold  (cluster-filtered rule sweep)
 - "Run SAR backtest for Activity Deviation ACH in Cluster 2" → threshold
@@ -153,7 +154,7 @@ Key distinction:
 - "What is OFAC?" → policy  (definition question — NOT a screening request)
 - "What does OFAC stand for?" → policy
 - "My dog OFAC met a cat the other day" → out_of_scope  (OFAC here is a name, not AML topic)
-- "OFAC said hello" → out_of_scope  (not an AML query)
+- "OFAC said hello" → out_of_scope
 - "Is OFAC the same as sanctions screening?" → policy  (terminology question — NOT a screening request)
 - "What does OFAC stand for?" → policy  (terminology question)
 - "What is OFAC?" → policy
@@ -163,7 +164,7 @@ Key distinction:
 Rules:
 - Output ONLY the label(s), comma-separated. No explanation, no punctuation other than commas.
 - A query can map to multiple labels (e.g. threshold,segmentation).
-- When in doubt between out_of_scope and a AML label, prefer the AML label.\
+- When in doubt between out_of_scope and an AML label, prefer the AML label.\
 """
 
 
@@ -175,6 +176,31 @@ class OrchestratorAgent:
         "- **Customer segmentation** — identify behavioral risk clusters using K-Means across transaction velocity, volume, and account characteristics\n"
         "- **AML policy Q&A** — answer questions on BSA/AML regulations, FFIEC examination guidance, FinCEN advisories, and Wolfsberg Group best practices\n\n"
         "Try one of the suggested prompts on the left, or ask me a question."
+    )
+
+    _CAPABILITY = (
+        "I'm ARIA — Agentic Risk Intelligence for AML. Here's what I do:\n\n"
+        "**1. Threshold Tuning**\n"
+        "I analyze FP/FN trade-offs as alert thresholds are swept across Business and Individual customer segments. "
+        "For each threshold column — average transaction amount, monthly transaction volume, or weekly transaction count — "
+        "I show you exactly how many SARs you catch and how many false positives you generate at every threshold level. "
+        "This lets your compliance team find the optimal cut-point: the threshold that maximizes SAR detection while "
+        "minimizing the investigator workload from low-value alerts.\n\n"
+        "**2. Customer Behavioral Segmentation**\n"
+        "I apply K-Means clustering to your customer base to identify natural behavioral risk groups based on "
+        "transaction velocity, volume, average amounts, account age, and account type. Each cluster gets a risk "
+        "profile so your team can apply different monitoring intensities to different customer groups instead of "
+        "treating all customers identically.\n\n"
+        "**3. AML Rule Analysis**\n"
+        "I run SAR backtests and 2D parameter sweeps across your 11 active monitoring rules. A SAR backtest shows "
+        "how the rule's SAR catch rate changes as its threshold is adjusted. A 2D sweep maps two parameters "
+        "simultaneously so you can see the full trade-off surface and identify the setting that best balances "
+        "detection against false positives.\n\n"
+        "**4. AML Policy Q&A**\n"
+        "I answer regulatory and compliance questions on BSA/AML, FinCEN guidance, OFAC/sanctions concepts, "
+        "Wolfsberg Principles, FATF recommendations, and general AML typologies — drawn from my training knowledge. "
+        "You can also upload your own org-specific documents and ask questions about them.\n\n"
+        "Ask me a question or try one of the suggested prompts on the left."
     )
 
     _OUT_OF_SCOPE = (
@@ -213,13 +239,31 @@ class OrchestratorAgent:
             valid = {"threshold", "segmentation", "ofac", "policy", "greeting", "out_of_scope"}
             labels = [l.strip().lower() for l in raw.split(",") if l.strip().lower() in valid]
         except Exception as e:
-            print(f"[orchestrator] classification error: {e} — defaulting to out_of_scope")
-            labels = ["out_of_scope"]
+            print(f"[orchestrator] classification error: {e} — defaulting to policy", flush=True)
+            labels = ["policy"]
 
         # Keyword override — correct obvious misrouting regardless of LLM output
         import difflib as _dl
         q_lower = query.lower()
         _words = q_lower.split()
+
+        # Conceptual/definitional questions about AML concepts → always policy
+        # Must run before is_threshold keyword check so "threshold tuning" / "segmentation"
+        # questions aren't hijacked by the operational keyword override.
+        _conceptual_verbs = r'\b(what is|what are|explain|how does|how do|describe|define|tell me about|overview of|walk me through)\b'
+        _conceptual_topics = [
+            "threshold tuning",
+            "dynamic segmentation", "behavioral segmentation", "customer segmentation",
+            "segmentation approach", "segmentation work", "segmentation method",
+            "k-means", "kmeans clustering",
+            "sar backtesting", "sar backtest", "backtesting",
+            "sanctions", "sanctions list",
+            "aria help", "aria assist",   # "how does ARIA help with X"
+        ]
+        if (re.search(_conceptual_verbs, q_lower)
+                and any(kw in q_lower for kw in _conceptual_topics)):
+            print("[orchestrator] conceptual pre-check → conceptual", flush=True)
+            return ["conceptual"]
 
         def _fuzzy(word_list, terms, cutoff=0.82):
             """True if any query word is a close match to any term (handles typos)."""
@@ -271,55 +315,60 @@ class OrchestratorAgent:
         elif is_rule_query and "policy" in labels and "threshold" in labels:
             labels = ["threshold"]
             print("[orchestrator] keyword override → threshold (rule query, dropped policy)")
-        elif "out_of_scope" in labels and (is_threshold or is_rule_query) and not is_segmentation:
-            labels = ["threshold"]
-            print("[orchestrator] keyword override → threshold (rescued from out_of_scope)")
-
         # Rescue FP/FN/TP/TN/2D definitional questions classified as "policy" → threshold
         _fn_fp_kw = ["false positive", "false negative", "true positive", "true negative", "2d grid", "2d sweep"]
         if labels == ["policy"] and not is_segmentation and not is_threshold and any(kw in q_lower for kw in _fn_fp_kw):
             labels = ["threshold"]
             print("[orchestrator] keyword override → threshold (FP/FN/2D definition rescued from policy)")
 
-        # Rescue EU/UN/FATF/beneficial-ownership policy questions from out_of_scope
-        _policy_kw = [
-            "beneficial ownership", "beneficial owner", "amld", "amla", "directive",
-            "eu aml", "eu regulation", "unodc", "fatf", "financial action task force",
-            "eba guideline", "eba gl", "un security council", "resolution 1373",
-            "politically exposed", "4th amld", "5th amld", "6th amld",
-            "smurfing",  # common synonym for structuring
-            "tructur",   # catches "tructuring" typo (structuring missing leading 's')
-        ]
-        if labels == ["out_of_scope"] and any(kw in q_lower for kw in _policy_kw):
-            labels = ["policy"]
-            print("[orchestrator] keyword override → policy (EU/UN/FATF/beneficial-ownership)")
-
-        # Rescue greetings and social acknowledgments misclassified as out_of_scope
+        # Greetings and social acknowledgments
         _greeting_tokens = {"hello", "hi", "hey", "howdy", "greetings", "ahoy"}
         _social_phrases  = ["thanks", "thank you", "that was helpful", "that's helpful",
                             "got it", "great, thanks", "sounds good", "perfect, thanks",
                             "appreciate it", "cheers", "ahoy matey"]
         _identity_phrases = ["what is your name", "what's your name", "who are you",
                              "are you aria", "your name is", "tell me your name"]
+        # Only match standalone capability questions — patterns that cannot be
+        # a prefix of "how does ARIA help *with X*" or similar topic queries.
+        _capability_phrases = [
+            "what can aria do",
+            "what does aria do",
+            "what is aria",
+            "aria's capabilities",
+            "what are your capabilities",
+            "what does aria offer",
+            "aria features",
+            "aria functionality",
+        ]
+        _is_capability = any(p in q_lower for p in _capability_phrases)
         _is_social = (q_lower.strip() in _greeting_tokens
                       or any(q_lower.strip().startswith(p) or q_lower.strip() == p
                              for p in _social_phrases))
         _is_identity = any(p in q_lower for p in _identity_phrases)
-        if _is_identity:
+        if _is_capability:
+            labels = ["capability"]
+            print("[orchestrator] keyword override → capability (ARIA capability question)")
+        elif _is_identity:
             labels = ["greeting"]
             print("[orchestrator] keyword override → greeting (identity question)")
-        elif labels == ["out_of_scope"] and _is_social:
-            labels = ["greeting"]
-            print("[orchestrator] keyword override → greeting (rescued social acknowledgment from out_of_scope)")
-
-        # Prevent data questions from being classified as greeting
+        # Prevent data questions from being misclassified as greeting → policy instead
         is_data_question = any(w in q_lower for w in [
             "show me", "can you show", "credit", "score", "income", "balance",
             "distribution", "customers", "average", "what is the",
         ])
         if "greeting" in labels and is_data_question:
+            labels = ["policy"]
+            print("[orchestrator] keyword override → policy (data question misclassified as greeting)")
+
+        # Social sentences where an AML term appears as a proper noun → out_of_scope
+        # e.g. "My dog OFAC met a cat", "OFAC said hello", "My SAR is acting strange"
+        _social_aml_noun = re.search(
+            r'\b(my|our|his|her|their|the)\s+(dog|cat|friend|colleague|boss|wife|husband|kid|son|daughter|team|neighbor)\b',
+            q_lower
+        )
+        if _social_aml_noun:
             labels = ["out_of_scope"]
-            print("[orchestrator] keyword override → out_of_scope (data question misclassified as greeting)")
+            print("[orchestrator] keyword override → out_of_scope (social sentence containing AML term)")
 
         # OFAC guard: only route to ofac agent when there is explicit screening-action context
         if "ofac" in labels:
@@ -351,14 +400,14 @@ class OrchestratorAgent:
                 labels = ["greeting"]
             else:
                 labels = ["policy"]
-            print(f"[orchestrator] keyword fallback labels: {labels}")
+            print(f"[orchestrator] keyword fallback labels: {labels}", flush=True)
 
         # Final guard: data questions must never route to greeting
         if "greeting" in labels and is_data_question:
-            labels = ["out_of_scope"]
-            print("[orchestrator] post-fallback override → out_of_scope (data question)")
+            labels = ["policy"]
+            print("[orchestrator] post-fallback override → policy (data question)")
 
-        print(f"[orchestrator] routing to: {labels}")
+        print(f"[orchestrator] routing to: {labels}", flush=True)
         return labels
 
     def run(self, query: str, tool_executor, last_assistant: str = "", history: list = None, last_cluster_result: str = "") -> tuple:
@@ -370,6 +419,15 @@ class OrchestratorAgent:
 
         if "greeting" in labels:
             return self._GREETING, []
+
+        if "capability" in labels:
+            return self._CAPABILITY, []
+
+        if "out_of_scope" in labels:
+            return self._OUT_OF_SCOPE, []
+
+        if "conceptual" in labels:
+            return self.policy_agent.run(query, tool_executor, "", history)
 
         # OFAC screening is handled directly via tool_executor (no specialist agent)
         if "ofac" in labels:
@@ -403,7 +461,7 @@ class OrchestratorAgent:
         agent_labels = [l for l in labels if l in self._agent_map]
 
         if not agent_labels:
-            return self._OUT_OF_SCOPE, []
+            return self.policy_agent.run(query, tool_executor, "", history)
 
         to_run = [(name, self._agent_map[name]) for name in agent_labels]
 

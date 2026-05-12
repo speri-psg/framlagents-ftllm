@@ -14,6 +14,11 @@ import re
 import time
 import sys
 import os
+import threading
+
+# Force line-buffered stdout so print() appears immediately in any terminal/shell
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
 
 # ── Ensure project root is on path so config + analytics imports work ─────────
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -477,7 +482,28 @@ SAR_COL_MAP = {
 
 orchestrator = OrchestratorAgent()
 
+# Pin model in GPU — overrides Ollama's 5-minute idle eviction for the session.
+try:
+    import urllib.request as _urlreq, json as _json
+    _pin_url  = OLLAMA_BASE_URL.replace("/v1", "") + "/api/generate"
+    _pin_data = _json.dumps({"model": OLLAMA_MODEL, "keep_alive": -1}).encode()
+    _urlreq.urlopen(_urlreq.Request(_pin_url, data=_pin_data,
+                                    headers={"Content-Type": "application/json"}), timeout=10)
+    print(f"Ollama: model '{OLLAMA_MODEL}' pinned in GPU (keep_alive=-1)")
+except Exception as _e:
+    print(f"Ollama: could not pin model — {_e}")
+
 # ── Suggested prompts ─────────────────────────────────────────────────────────
+DEMO_PROMPTS = [
+    "What are sanctions lists",
+    "What is threshold tuning",
+    "What is dynamic segmentation",
+    "What is OFAC",
+    "What are the main differences between US and Canada in AML regulations",
+    "What is SAR backtesting",
+    "How does ARIA help with SAR backtesting",
+]
+
 SUGGESTED_PROMPTS = [
     # Threshold Tuning
     "Show FP/FN trade-off for Business customers by monthly transaction amount",
@@ -708,10 +734,25 @@ def _filter_by_cluster(df_rule_sweep, cluster):
 
 
 # ── Tool executor ─────────────────────────────────────────────────────────────
-_cluster_cache        = _startup_cluster_cache  # pre-populated at startup; updated on each cluster run
-_current_query        = ""  # set before each orchestrator.run() so tool_executor can read it
-_last_2d_state        = {}  # caches last 2D sweep for drill-down (single-user demo)
-_last_cluster_result  = ""  # full multi-cluster response; injected as [PREVIOUS CLUSTERING RESULT] for follow-ups
+_cluster_cache       = _startup_cluster_cache  # pre-populated at startup; updated on each cluster run
+_thread_local        = threading.local()        # per-request: .current_query, .last_2d_state
+_last_cluster_result    = ""   # last clustering model response (for multi-turn follow-ups)
+_last_cluster_raw_stats = ""   # raw pre-computed stats block — more reliable for comparison queries
+
+def _json_safe(obj):
+    """Recursively convert numpy types to JSON-serializable Python types."""
+    import numpy as np
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(i) for i in obj]
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    return obj
 
 def tool_executor(tool_name, tool_input):
     """Execute a tool called by an agent. Returns (result_text, fig_or_None)."""
@@ -760,7 +801,9 @@ def tool_executor(tool_name, tool_input):
         heatmap     = make_figures.rule_2d_heatmap(grid) if grid else None
         ranked_tbl  = make_figures.rule_2d_ranked_table(grid) if grid else None
         if grid:
-            _last_2d_state.update({
+            if not hasattr(_thread_local, 'last_2d_state'):
+                _thread_local.last_2d_state = {}
+            _thread_local.last_2d_state.update({
                 "grid":        grid,
                 "risk_factor": risk_factor,
                 "param1":      grid["param1"],
@@ -807,6 +850,19 @@ def tool_executor(tool_name, tool_input):
         tbl_fig = make_figures.rule_sweep_figure(df_sweep, risk_factor, sweep_param)
         return stats, tbl_fig
 
+    elif tool_name == "cluster_threshold_analysis":
+        if DF_SS is None or DF_SAR is None:
+            return "Segmentation or SAR data not available.", None
+        import lambda_cluster_threshold
+        segment     = tool_input.get("segment", "Business")
+        raw_col     = tool_input.get("threshold_column", "AVG_TRXN_AMT")
+        n_clusters  = int(tool_input.get("n_clusters", 4))
+        target_rate = float(tool_input.get("target_sar_rate", 0.90))
+        text, fig = lambda_cluster_threshold.cluster_threshold_analysis(
+            DF_SS, DF_SAR, segment, raw_col, n_clusters, target_rate
+        )
+        return text, fig
+
     elif tool_name == "alerts_distribution":
         bar_fig = lambda_ds_performance.alerts_distribution(DF)
         tbl_fig = make_figures.segment_stats_figure(DF)
@@ -826,6 +882,8 @@ def tool_executor(tool_name, tool_input):
             "stats":         stats,
             "customer_type": customer_type,
         })
+        global _last_cluster_raw_stats
+        _last_cluster_raw_stats = stats
         treemap_fig = lambda_ds_performance.smartseg_tree_dynamic(
             df_clustered, customer_type, dims=_DS_DIMS, df_rule_sweep=DF_RULE_SWEEP
         )
@@ -855,21 +913,30 @@ def tool_executor(tool_name, tool_input):
         filter_clusters = tool_input.get("filter_clusters", None)
 
         # If the user didn't mention a specific cluster count, ignore the model's choice and use 4.
-        _n_match = re.search(r'\b([2-8])\s*clusters?\b', _current_query, re.IGNORECASE)
+        _cq = getattr(_thread_local, 'current_query', '')
+        _n_match = re.search(r'\b([2-8])\s*clusters?\b', _cq, re.IGNORECASE)
         if not _n_match:
-            _n_match = re.search(r'\binto\s+([2-8])\b', _current_query, re.IGNORECASE)
+            _n_match = re.search(r'\binto\s+([2-8])\b', _cq, re.IGNORECASE)
         if not _n_match:
-            _n_match = re.search(r'\bonly\s+([2-8])\b', _current_query, re.IGNORECASE)
+            _n_match = re.search(r'\bonly\s+([2-8])\b', _cq, re.IGNORECASE)
         if _n_match:
             n_clusters = max(2, min(6, int(_n_match.group(1))))
         else:
             n_clusters = 4  # user didn't specify — always default to 4
 
-        if filter_clusters and _cluster_cache:
-            # Second call: use cached data, skip re-clustering
-            df_clustered = _cluster_cache["df_clustered"]
-            scatter_fig  = _cluster_cache["scatter_fig"]
-            stats        = _cluster_cache["stats"]
+        if filter_clusters:
+            # Second call: use startup prebuilt for this customer_type — never the shared
+            # _cluster_cache which may hold a different user's clustering run.
+            _prebuilt_for_filter = {
+                "All":        _startup_cluster_cache,
+                "Business":   _startup_cluster_cache_biz,
+                "Individual": _startup_cluster_cache_ind,
+            }.get(customer_type, _startup_cluster_cache)
+            if not _prebuilt_for_filter:
+                return "No clustering data available for filtering. Run clustering first.", None
+            df_clustered = _prebuilt_for_filter["df_clustered"]
+            scatter_fig  = _prebuilt_for_filter["scatter_fig"]
+            stats        = _prebuilt_for_filter["stats"]
 
             # Filter scatter: keep only traces for requested clusters
             import plotly.graph_objects as go
@@ -908,6 +975,7 @@ def tool_executor(tool_name, tool_input):
                 )
                 stats_table = make_figures.cluster_stats_table(df_clustered, customer_type)
                 figs = (stats_table, scatter_fig, treemap_fig) if stats_table is not None else (scatter_fig, treemap_fig)
+                _last_cluster_raw_stats = stats
                 return stats, figs
 
             # Cache miss or non-default n_clusters: run full clustering
@@ -926,6 +994,7 @@ def tool_executor(tool_name, tool_input):
             )
             stats_table  = make_figures.cluster_stats_table(df_clustered, customer_type)
             figs = (stats_table, scatter_fig, treemap_fig) if stats_table is not None else (scatter_fig, treemap_fig)
+            _last_cluster_raw_stats = stats
             return stats, figs
 
     elif tool_name == "ofac_screening":
@@ -1076,6 +1145,12 @@ def _chart_content(tool_name, tool_input, fig):
             labels = [f"Cluster Analysis — {ct}"]
         blocks.append({"type": "text", "text": "📊 Use **Segment Customer Drilldown** and **Cluster Scatter Plot** in the left sidebar to explore the segments interactively."})
 
+    elif tool_name == "cluster_threshold_analysis":
+        seg = tool_input.get("segment", "")
+        col = tool_input.get("threshold_column", "")
+        figs   = [fig]
+        labels = [f"Adaptive Thresholds — {seg} / {col}"]
+
     else:
         figs   = [fig] if not isinstance(fig, tuple) else list(fig)
         labels = [tool_name] * len(figs)
@@ -1123,48 +1198,24 @@ _sidebar = dbc.Card([
 
         html.Hr(className="my-2"),
 
-        html.Span("Suggested Prompts", className="fw-semibold d-block mb-2 small"),
-        html.Div([
-            *[html.Span("Threshold Tuning", className="text-muted d-block mb-1 small fst-italic")],
-            *[html.Div([
-                dbc.Button(
-                    p,
-                    id={"type": "prompt-btn", "index": i},
-                    color="outline-primary",
-                    size="sm",
-                    className="text-start flex-grow-1",
-                    style={"whiteSpace": "normal", "height": "auto"},
-                    n_clicks=0,
-                ),
-                dcc.Clipboard(content=p, title="Copy", style={"cursor": "pointer", "paddingTop": "2px"}),
-            ], className="d-flex align-items-start gap-1 mb-2") for i, p in enumerate(SUGGESTED_PROMPTS[:3])],
-            *[html.Span("Dynamic Segmentation", className="text-muted d-block mb-1 mt-1 small fst-italic")],
-            *[html.Div([
-                dbc.Button(
-                    p,
-                    id={"type": "prompt-btn", "index": i + 3},
-                    color="outline-success",
-                    size="sm",
-                    className="text-start flex-grow-1",
-                    style={"whiteSpace": "normal", "height": "auto"},
-                    n_clicks=0,
-                ),
-                dcc.Clipboard(content=p, title="Copy", style={"cursor": "pointer", "paddingTop": "2px"}),
-            ], className="d-flex align-items-start gap-1 mb-2") for i, p in enumerate(SUGGESTED_PROMPTS[3:6])],
-            *[html.Span("Rule-Level Sweep", className="text-muted d-block mb-1 mt-1 small fst-italic")],
-            *[html.Div([
-                dbc.Button(
-                    p,
-                    id={"type": "prompt-btn", "index": i + 6},
-                    color="outline-warning",
-                    size="sm",
-                    className="text-start flex-grow-1",
-                    style={"whiteSpace": "normal", "height": "auto"},
-                    n_clicks=0,
-                ),
-                dcc.Clipboard(content=p, title="Copy", style={"cursor": "pointer", "paddingTop": "2px"}),
-            ], className="d-flex align-items-start gap-1 mb-2") for i, p in enumerate(SUGGESTED_PROMPTS[6:])],
-        ]),
+        html.Span("Demo Prompts", className="fw-semibold d-block mb-1 small"),
+        dbc.Select(
+            id="demo-prompt-dropdown",
+            options=[
+                {"label": "Select a prompt...", "value": ""},
+                {"label": "── AML Policy & Concepts ──", "value": "_h1", "disabled": True},
+                *[{"label": p, "value": p} for p in DEMO_PROMPTS],
+                {"label": "── Threshold Tuning ──", "value": "_h2", "disabled": True},
+                *[{"label": p, "value": p} for p in SUGGESTED_PROMPTS[:3]],
+                {"label": "── Dynamic Segmentation ──", "value": "_h3", "disabled": True},
+                *[{"label": p, "value": p} for p in SUGGESTED_PROMPTS[3:6]],
+                {"label": "── Rule-Level Sweep ──", "value": "_h4", "disabled": True},
+                *[{"label": p, "value": p} for p in SUGGESTED_PROMPTS[6:]],
+            ],
+            value=DEMO_PROMPTS[0],
+            className="mb-3",
+            style={"fontSize": "0.8rem"},
+        ),
 
         html.Hr(className="my-2"),
 
@@ -1235,6 +1286,27 @@ _chat_panel = html.Div([
             size="sm",
             outline=True,
             style={"position": "absolute", "bottom": "70px", "right": "24px", "zIndex": 999, "opacity": 0.7},
+        ),
+        # Thinking indicator — absolute overlay, shown mid-callback via set_props
+        html.Div(
+            [dbc.Spinner(size="sm", color="secondary", type="border"),
+             html.Span("Thinking…", className="ms-2 small text-muted")],
+            id="chat-thinking-indicator",
+            style={
+                "display": "none",
+                "position": "absolute",
+                "bottom": "110px",
+                "left": "50%",
+                "transform": "translateX(-50%)",
+                "background": "rgba(255,255,255,0.92)",
+                "padding": "5px 16px",
+                "borderRadius": "20px",
+                "border": "1px solid #dee2e6",
+                "zIndex": 1001,
+                "alignItems": "center",
+                "gap": "6px",
+                "whiteSpace": "nowrap",
+            },
         ),
     ], id="chat-scroll-container", style={
         "flex": "1",
@@ -1313,6 +1385,8 @@ app.layout = dbc.Container([
     dcc.Store(id="treemap-store", data=None),
     dcc.Store(id="scatter-store", data=None),
     dcc.Store(id="charts-panel-store", data=None),
+    dcc.Store(id="cluster-result-store", data=""),
+    dcc.Store(id="scatter-resize-dummy"),
     # One-shot interval to inject welcome message after page load
     dcc.Interval(id="welcome-interval", interval=300, max_intervals=1),
 
@@ -1452,25 +1526,21 @@ def toggle_about(n_clicks, is_open):
     prevent_initial_call=True,
 )
 def show_welcome(n):
+    with open(r"C:\Users\Aaditya\PycharmProjects\framlagents-ftllm\diag_welcome.txt", "a") as _f:
+        _f.write(f"show_welcome called n={n}\n")
     return INITIAL_MESSAGES
 
 
+
 @callback(
-    Output("pending-prompt", "data"),
-    Input({"type": "prompt-btn", "index": ALL}, "n_clicks"),
+    Output("pending-prompt", "data", allow_duplicate=True),
+    Input("demo-prompt-dropdown", "value"),
     prevent_initial_call=True,
 )
-def queue_prompt(n_clicks_list):
-    ctx = callback_context
-    if not ctx.triggered:
+def queue_demo_prompt(value):
+    if not value or value.startswith("_h"):
         return no_update
-    triggered = ctx.triggered[0]["prop_id"]
-    try:
-        idx = json.loads(triggered.split(".")[0])["index"]
-    except Exception:
-        return no_update
-    # Attach timestamp so clicking the same prompt twice still fires
-    return {"query": SUGGESTED_PROMPTS[idx], "ts": time.time()}
+    return {"query": value, "ts": time.time()}
 
 
 @server.route("/stop", methods=["POST"])
@@ -1495,12 +1565,43 @@ app.clientside_callback(
 )
 
 
+# Clientside callback — fires in the browser instantly when a demo prompt is selected.
+# Appends the user bubble and shows the thinking indicator without a server round-trip,
+# so the user sees feedback before handle_chat even starts.
+app.clientside_callback(
+    """
+    function(pending_prompt, messages) {
+        if (!pending_prompt || !pending_prompt.query) {
+            return [window.dash_clientside.no_update, {"display": "none"}];
+        }
+        var userMsg = {role: "user", content: pending_prompt.query};
+        var MAX = 30;
+        var newMsgs = (messages || []).concat([userMsg]).slice(-MAX);
+        var indicatorStyle = {
+            display: "flex", position: "absolute", bottom: "110px",
+            left: "50%", transform: "translateX(-50%)",
+            background: "rgba(255,255,255,0.92)", padding: "5px 16px",
+            borderRadius: "20px", border: "1px solid #dee2e6",
+            zIndex: 1001, alignItems: "center", gap: "6px", whiteSpace: "nowrap"
+        };
+        return [newMsgs, indicatorStyle];
+    }
+    """,
+    Output("chat-component", "messages", allow_duplicate=True),
+    Output("chat-thinking-indicator", "style", allow_duplicate=True),
+    Input("pending-prompt", "data"),
+    State("chat-component", "messages"),
+    prevent_initial_call=True,
+)
+
+
 @callback(
     Output("chat-component", "messages"),
     Output("last-2d-sweep-store", "data"),
     Output("treemap-store", "data"),
     Output("scatter-store", "data"),
     Output("charts-panel-store", "data"),
+    Output("chat-thinking-indicator", "style", allow_duplicate=True),
     Input("chat-component", "new_message"),
     Input("pending-prompt", "data"),
     State("chat-component", "messages"),
@@ -1508,14 +1609,17 @@ app.clientside_callback(
 )
 def handle_chat(new_message, pending_prompt, messages):
     import threading as _thr
+    from dash import set_props as _set_props
     ctx     = callback_context
     trigger = ctx.triggered[0]["prop_id"] if ctx.triggered else ""
-    print(f"[handle_chat] enter thread={_thr.current_thread().ident} trigger={trigger} msgs={len(messages or [])}")
+    print(f"[handle_chat] enter thread={_thr.current_thread().ident} trigger={trigger} msgs={len(messages or [])}", flush=True)
 
     # Determine query source
     if "pending-prompt" in trigger and pending_prompt:
-        query     = pending_prompt["query"]
-        user_msg  = {"role": "user", "content": query}
+        query    = pending_prompt["query"]
+        user_msg = {"role": "user", "content": query}
+        # User bubble + indicator are shown by the clientside callback immediately.
+        # handle_chat builds the response and hides the indicator via its Output.
     elif new_message and new_message.get("role") == "user":
         content = new_message.get("content", "")
         if isinstance(content, list):
@@ -1526,10 +1630,13 @@ def handle_chat(new_message, pending_prompt, messages):
             query = content
         user_msg   = new_message
     else:
-        return no_update, no_update, no_update, no_update, no_update
+        return no_update, no_update, no_update, no_update, no_update, no_update
 
     if not query.strip() and not (isinstance(new_message, dict) and isinstance(new_message.get("content"), list)):
-        return no_update, no_update, no_update, no_update, no_update
+        return no_update, no_update, no_update, no_update, no_update, no_update
+
+    # Lock the dropdown while the agent runs (best-effort race guard).
+    _set_props("demo-prompt-dropdown", {"disabled": True})
 
     updated = messages + [user_msg]
 
@@ -1561,7 +1668,8 @@ def handle_chat(new_message, pending_prompt, messages):
             ingest_msg = f"Could not index '{file_name}': {e}"
             # Upload failed — always return immediately, never fall through to agent
             bot_response = {"role": "assistant", "content": ingest_msg}
-            return (updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update, no_update
+            _set_props("demo-prompt-dropdown", {"disabled": False})
+            return (updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update, no_update, {"display": "none"}
 
         # If the user also typed a question alongside the file, continue to answer it.
         # Otherwise just confirm and return.
@@ -1571,7 +1679,8 @@ def handle_chat(new_message, pending_prompt, messages):
             ingest_confirmation = ingest_msg
         else:
             bot_response = {"role": "assistant", "content": ingest_msg}
-            return (updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update, no_update
+            _set_props("demo-prompt-dropdown", {"disabled": False})
+            return (updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update, no_update, {"display": "none"}
     else:
         ingest_confirmation = None
 
@@ -1595,14 +1704,16 @@ def handle_chat(new_message, pending_prompt, messages):
             "Try a prompt like: *'Show FP/FN trade-off for Business customers'* or *'Run SAR backtest for Activity Deviation ACH rule'*"
         )
         bot_response = {"role": "assistant", "content": help_text}
-        return (updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update, no_update
+        _set_props("demo-prompt-dropdown", {"disabled": False})
+        return (updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update, no_update, {"display": "none"}
 
     # Clear any stale stop signal from a previous button click before starting a new query
     _agent_stop_event.clear()
 
     try:
-        global _current_query, _last_cluster_result
-        _current_query = query
+        global _last_cluster_result, _last_cluster_raw_stats
+        _thread_local.current_query = query
+        _thread_local.last_2d_state = {}
         def _msg_text(m):
             c = m.get("content", "")
             if isinstance(c, str):
@@ -1635,15 +1746,16 @@ def handle_chat(new_message, pending_prompt, messages):
         # If the user uploaded a document alongside a question, force policy agent
         # so the question is answered from the KB regardless of query keywords.
         if ingest_confirmation:
-            agent_text, chart_results = orchestrator.policy_agent.run(query, tool_executor, upload_only=True)
+            agent_text, chart_results = orchestrator.policy_agent.run(query, tool_executor)
         else:
-            agent_text, chart_results = orchestrator.run(query, tool_executor, last_assistant, history, _last_cluster_result)
+            # Prefer raw pre-computed stats over model prose for multi-turn cluster follow-ups
+            _cluster_ctx = _last_cluster_raw_stats or _last_cluster_result
+            agent_text, chart_results = orchestrator.run(query, tool_executor, last_assistant, history, _cluster_ctx)
         # Persist full clustering result for multi-turn cluster follow-ups.
-        # Only update when a new clustering tool was actually called (chart present = tool ran).
         _seg_cluster_tools = {"ds_cluster_analysis", "cluster_analysis"}
         if any(r[0] in _seg_cluster_tools for r in chart_results):
             _last_cluster_result = agent_text or ""
-        print(f"[app] raw agent_text ({len(agent_text or '')} chars): {repr((agent_text or '')[:300])}")
+        print(f"[app] raw agent_text ({len(agent_text or '')} chars): {repr((agent_text or '')[:300])}", flush=True)
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -1653,13 +1765,14 @@ def handle_chat(new_message, pending_prompt, messages):
         else:
             msg_text = f"Sorry, something went wrong: {e}"
         bot_response = {"role": "assistant", "content": msg_text}
-        return (updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update, no_update
+        _set_props("demo-prompt-dropdown", {"disabled": False})
+        return (updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update, no_update, {"display": "none"}
 
     # Parse DISPLAY_CLUSTERS directive and filter charts if present
     # Only honour the directive if the user actually asked to filter clusters
     _filter_keywords = re.search(
         r'\b(show only|only cluster|highest risk|lowest|top \d|filter)\b',
-        _current_query, re.IGNORECASE
+        query, re.IGNORECASE
     )
     _dc_match = re.search(r'DISPLAY_CLUSTERS:\s*([\d,\s]+)', agent_text or "")
     if _dc_match and chart_results and _cluster_cache and _filter_keywords:
@@ -1692,13 +1805,12 @@ def handle_chat(new_message, pending_prompt, messages):
     agent_text = re.sub(r'^Tool result for [^:\n]+:\n?', '', agent_text, flags=re.MULTILINE).strip()  # model copies tool-msg prefix
     agent_text = re.sub(r'^The PRE-COMPUTED[^\n]*\n?', '', agent_text).strip()  # leaked instruction header
     agent_text = re.sub(r'\s*DISPLAY_CLUSTERS:[\d,\s]*', '', agent_text).strip()
-    agent_text = re.sub(r'===.*?PRE-COMPUTED ANALYSIS.*?===\n?', '', agent_text).strip()
-    agent_text = re.sub(r'===\s*END PRE-COMPUTED ANALYSIS\s*===\n?', '', agent_text).strip()
+    agent_text = re.sub(r'===.*?PRE-COMPUTED ANALYSIS.*?===.*?===\s*END PRE-COMPUTED ANALYSIS\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
     agent_text = re.sub(r'PRE-COMPUTED ANALYSIS[:\s]*\n?', '', agent_text).strip()
-    agent_text = re.sub(r'===.*?PRE-COMPUTED SEGMENT STATS.*?===\n?', '', agent_text).strip()
-    agent_text = re.sub(r'===\s*END PRE-COMPUTED SEGMENT STATS\s*===\n?', '', agent_text).strip()
-    agent_text = re.sub(r'===.*?PRE-COMPUTED CLUSTER STATS.*?===\n?', '', agent_text).strip()
-    agent_text = re.sub(r'===\s*END PRE-COMPUTED CLUSTER STATS\s*===\n?', '', agent_text).strip()
+    agent_text = re.sub(r'===.*?PRE-COMPUTED SEGMENT STATS.*?===.*?===\s*END PRE-COMPUTED SEGMENT STATS\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
+    agent_text = re.sub(r'===.*?PRE-COMPUTED CLUSTER STATS.*?===.*?===\s*END PRE-COMPUTED CLUSTER STATS\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
+    agent_text = re.sub(r'===.*?PRE-COMPUTED CLUSTER RULE SUMMARY.*?===.*?===\s*END CLUSTER RULE SUMMARY\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
+    agent_text = re.sub(r'===.*?PRE-COMPUTED CLUSTER THRESHOLD ANALYSIS.*?===.*?===\s*END CLUSTER THRESHOLD ANALYSIS\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
     # Replace LaTeX math operators — model occasionally emits $\ge$/$\le$ instead of >= / <=
     agent_text = re.sub(r'\$\\geq\$', '≥', agent_text)
     agent_text = re.sub(r'\$\\leq\$', '≤', agent_text)
@@ -1706,14 +1818,10 @@ def handle_chat(new_message, pending_prompt, messages):
     agent_text = re.sub(r'\$\\le\$',  '≤', agent_text)
     agent_text = re.sub(r'\$\\gt\$',  '>',  agent_text)
     agent_text = re.sub(r'\$\\lt\$',  '<',  agent_text)
-    agent_text = re.sub(r'===.*?PRE-COMPUTED SAR BACKTEST.*?===\n?', '', agent_text).strip()
-    agent_text = re.sub(r'===\s*END PRE-COMPUTED SAR BACKTEST\s*===\n?', '', agent_text).strip()
-    agent_text = re.sub(r'===.*?PRE-COMPUTED RULE SWEEP.*?===\n?', '', agent_text).strip()
-    agent_text = re.sub(r'===\s*END RULE SWEEP\s*===\n?', '', agent_text).strip()
-    agent_text = re.sub(r'===.*?PRE-COMPUTED RULE LIST.*?===\n?', '', agent_text).strip()
-    agent_text = re.sub(r'===\s*END RULE LIST\s*===\n?', '', agent_text).strip()
-    agent_text = re.sub(r'===.*?PRE-COMPUTED 2D SWEEP.*?===\n?', '', agent_text).strip()
-    agent_text = re.sub(r'===\s*END 2D SWEEP\s*===\n?', '', agent_text).strip()
+    agent_text = re.sub(r'===.*?PRE-COMPUTED SAR BACKTEST.*?===.*?===\s*END PRE-COMPUTED SAR BACKTEST\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
+    agent_text = re.sub(r'===.*?PRE-COMPUTED RULE SWEEP.*?===.*?===\s*END RULE SWEEP\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
+    agent_text = re.sub(r'===.*?PRE-COMPUTED RULE LIST.*?===.*?===\s*END RULE LIST\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
+    agent_text = re.sub(r'===.*?PRE-COMPUTED 2D SWEEP.*?===.*?===\s*END 2D SWEEP\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
     agent_text = re.sub(r'2D SWEEP[^\n]*Copy this verbatim[^\n]*\n?', '', agent_text, flags=re.IGNORECASE).strip()
     # Catch any remaining PRE-COMPUTED lines not matched by the patterns above
     # e.g. "PRE-COMPUTED SAR BACKTEST (copy this verbatim, do not alter numbers) ==="
@@ -1866,10 +1974,11 @@ def handle_chat(new_message, pending_prompt, messages):
     else:
         bot_response = {"role": "assistant", "content": prefix + (agent_text or "(No response)")}
 
-    # Signal drill-down store if a 2D sweep was just run
+    # Signal drill-down store if a 2D sweep was just run; store full state for per-user drill-down
     sweep_store = no_update
-    if _last_2d_state and any(tn == "rule_2d_sweep" for tn, _, _ in (chart_results or [])):
-        sweep_store = {"ts": _last_2d_state.get("ts", 0)}
+    _local_2d = getattr(_thread_local, 'last_2d_state', {})
+    if _local_2d and any(tn == "rule_2d_sweep" for tn, _, _ in (chart_results or [])):
+        sweep_store = _json_safe(_local_2d)
 
     # Signal treemap store if a clustering tool just ran
     treemap_store = no_update
@@ -1889,9 +1998,10 @@ def handle_chat(new_message, pending_prompt, messages):
                 scatter_store = scatter_fig.to_dict()
             break
 
+    _set_props("demo-prompt-dropdown", {"disabled": False})
     final_messages = (updated + [bot_response])[-_MAX_CHAT_MESSAGES:]
     charts_out = all_chart_dicts if all_chart_dicts else no_update
-    return final_messages, sweep_store, treemap_store, scatter_store, charts_out
+    return final_messages, sweep_store, treemap_store, scatter_store, charts_out, {"display": "none"}
 
 
 @callback(
@@ -1930,9 +2040,9 @@ def render_charts_panel(charts):
 )
 def refresh_drilldown_heatmap(store_data):
     """Render CSS-based heatmap — browser-agnostic, no canvas/WebGL."""
-    if not store_data or not _last_2d_state.get("grid"):
+    if not store_data or not store_data.get("grid"):
         return "", True
-    html_table = make_figures.rule_2d_heatmap_html(_last_2d_state["grid"])
+    html_table = make_figures.rule_2d_heatmap_html(store_data["grid"])
     return html_table, False
 
 
@@ -1965,21 +2075,22 @@ def heatmap_cell_clicked(n_clicks_list):
 @callback(
     Output("drilldown-table-container", "children"),
     Input("drilldown-heatmap-click-store", "data"),
+    State("last-2d-sweep-store", "data"),
     prevent_initial_call=True,
 )
-def drilldown_on_click(click_data):
+def drilldown_on_click(click_data, sweep_state):
     """Filter customers at the clicked (p1_idx, p2_idx) cell."""
-    if not click_data or not _last_2d_state.get("grid"):
+    if not click_data or not sweep_state or not sweep_state.get("grid"):
         return "Click a cell in the heatmap to see customer breakdown."
 
-    grid   = _last_2d_state["grid"]
+    grid   = sweep_state["grid"]
     p2_val = grid["p2_vals"][int(click_data["p2_idx"])]
     p1_val = grid["p1_vals"][int(click_data["p1_idx"])]
 
-    rf      = _last_2d_state["risk_factor"]
-    param1  = _last_2d_state["param1"]
-    param2  = _last_2d_state["param2"]
-    cluster = _last_2d_state.get("cluster")
+    rf      = sweep_state["risk_factor"]
+    param1  = sweep_state["param1"]
+    param2  = sweep_state["param2"]
+    cluster = sweep_state.get("cluster")
 
     df_sweep = _filter_by_cluster(DF_RULE_SWEEP, cluster)
     tp_df, fp_df, fn_df, tn_df, col1, col2 = lambda_rule_analysis.compute_2d_drilldown(
@@ -1989,7 +2100,7 @@ def drilldown_on_click(click_data):
     if tp_df is None:
         return "Could not compute drill-down — rule data unavailable."
 
-    grid    = _last_2d_state["grid"]
+    grid    = sweep_state["grid"]
     p1_lbl  = grid["p1_label"]
     p2_lbl  = grid["p2_label"]
 
@@ -2095,6 +2206,24 @@ def refresh_scatter_offcanvas(scatter_data):
 )
 def toggle_scatter_offcanvas(n, is_open):
     return not is_open
+
+
+# Firefox fix: dispatch a resize event after the offcanvas animation so Plotly
+# re-measures the now-visible container and renders the scatter correctly.
+app.clientside_callback(
+    """
+    function(is_open) {
+        if (is_open) {
+            setTimeout(function() {
+                window.dispatchEvent(new Event('resize'));
+            }, 350);
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("scatter-resize-dummy", "data"),
+    Input("scatter-offcanvas", "is_open"),
+)
 
 
 @callback(

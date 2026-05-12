@@ -218,6 +218,53 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "cluster_threshold_analysis",
+            "description": (
+                "Run K-Means behavioral segmentation on a customer segment, then compute per-cluster "
+                "adaptive thresholds that reduce false positives while maintaining SAR catch rate. "
+                "Returns a comparison of uniform vs. cluster-adaptive alert thresholds and a bar chart "
+                "showing false positive counts per cluster under each approach. "
+                "Use this when the user asks about adaptive thresholds, per-cluster thresholds, "
+                "how behavioral segmentation improves alert sensitivity, cluster-specific threshold "
+                "recommendations, or reducing FPs by segment cluster."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "segment": {
+                        "type": "string",
+                        "enum": ["Business", "Individual"],
+                        "description": "Customer segment to analyze.",
+                    },
+                    "threshold_column": {
+                        "type": "string",
+                        "enum": ["AVG_TRXNS_WEEK", "AVG_TRXN_AMT", "TRXN_AMT_MONTHLY"],
+                        "description": (
+                            "Column to use as the alert threshold dimension. "
+                            "AVG_TRXN_AMT = average dollar amount per transaction. "
+                            "TRXN_AMT_MONTHLY = average total monthly transaction volume. "
+                            "AVG_TRXNS_WEEK = average number of transactions per week."
+                        ),
+                    },
+                    "n_clusters": {
+                        "type": "integer",
+                        "description": "Number of behavioral clusters (2–6). Default 4.",
+                    },
+                    "target_sar_rate": {
+                        "type": "number",
+                        "description": (
+                            "Minimum SAR catch rate to maintain at each cluster threshold (0–1). "
+                            "Default 0.90 (90%). Lower values allow more aggressive FP reduction."
+                        ),
+                    },
+                },
+                "required": ["segment", "threshold_column"],
+            },
+        },
+    },
 ]
 
 SYSTEM_PROMPT = """\
@@ -246,7 +293,7 @@ RULES — follow these exactly:
 6. segment must be exactly one of: Business, Individual
 7. If the user does not specify a segment, default to Business.
 8. If the user does not specify a threshold column, default to AVG_TRXNS_WEEK.
-9. After receiving tool results, the tool result contains a PRE-COMPUTED section. You MUST copy that section word-for-word into your response. Do NOT change any numbers, thresholds, or directional statements. After copying it, add ONE sentence of AML domain insight.
+9. After receiving tool results: (a) First output ONE ### header line naming the analysis — e.g. "### AML Rule Performance Overview", "### SAR Backtest — Elder Abuse | z_threshold", "### 2D Sweep — Elder Abuse | Floor Amount × Age Threshold", "### Threshold Sweep — Business | Avg Weekly Transactions", "### SAR Catch Rate — Business | Monthly Transaction Volume", "### Dataset Summary", "### Rule Performance — Cluster 3". (b) Then copy the PRE-COMPUTED section word-for-word. Do NOT change any numbers, thresholds, or directional statements. (c) Then add ONE sentence of AML domain insight.
 10. Do NOT paraphrase, round, or restate the numbers differently.
 11. Do NOT include JSON or code blocks in your final reply.
 12. Call the tool ONCE only. After receiving the tool result, write your final response immediately.
@@ -263,7 +310,9 @@ RULES — follow these exactly:
 23. After calling list_rules, if the user asked about a rule by a name that does not appear in the list (e.g. "layering", "smurfing") — state that no rule by that name exists and list the 11 available rules. Do NOT guess which rule "covers" the concept.
 24. For any question about how ALL rules perform for a specific behavioral cluster — call cluster_rule_summary with the cluster number. Do NOT call list_rules or loop over rule_sar_backtest for this.
 25. If a previous tool call returned an error about an invalid sweep parameter (e.g. "Unknown sweep_param_1" or "Unknown sweep_param_2"), and you asked the user to choose a valid parameter, and the user's reply is a parameter name (e.g. floor_amount, z_threshold, age_threshold, pair_total, ratio_tolerance, time_window, min_transactions, days_required, daily_floor) — do NOT treat it as a new query. Resume the previous rule_2d_sweep or rule_sar_backtest call with the same risk_factor, keeping all valid parameters unchanged and replacing only the invalid one with the user's corrected choice.
-26. For pure definitional questions about TP, FP, FN, TN, precision, recall, crossover, the effect of raising or lowering thresholds on FP/FN counts, or what a 2D grid/sweep shows — answer DIRECTLY from the DEFINITIONS section above. Do NOT call any tool. Answer in 2–3 sentences using only the definitions listed above.\
+26. For pure definitional or conceptual questions about TP, FP, FN, TN, precision, recall, crossover, threshold tuning, the effect of raising or lowering thresholds on FP/FN counts, or what a 2D grid/sweep shows — answer DIRECTLY using the DEFINITIONS section above and your AML knowledge. Do NOT call any tool. Give a complete explanation: what the concept means, why it matters in AML transaction monitoring, and how it works in practice. No length limit.
+27. For questions about per-cluster adaptive thresholds, how behavioral segmentation improves alert sensitivity, cluster-specific threshold recommendations, or reducing false positives by customer cluster — call cluster_threshold_analysis with segment and threshold_column. Optionally pass n_clusters (default 4) and target_sar_rate (default 0.90). Do NOT call threshold_tuning or sar_backtest for this — cluster_threshold_analysis already computes the uniform baseline internally.
+28. When the user asks about "highest precision", "best precision", "most precise rules", or "top precision" — after calling list_rules, sort the rules from the RULE LIST by the precision=X% field in DESCENDING order and identify the top rules. High precision = high SAR%, low FP ratio. Do NOT sort by FP count. Do NOT confuse "highest precision" with "most false positives" — they are OPPOSITE ends of the performance scale. Rules with the largest FP counts have the LOWEST precision.
 """
 
 

@@ -315,6 +315,7 @@ class BaseAgent:
         create_kwargs = dict(
             model=self.model,
             max_tokens=MAX_TOKENS_TOOL,
+            temperature=0,
             messages=messages,
         )
         if self.tools:
