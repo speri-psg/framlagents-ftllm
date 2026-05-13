@@ -3,19 +3,21 @@ V43 training examples (2026-05-13).
 
 Targets:
 
-  AA_V43_1–3  Precision-ranking — Gap 1 fix: include plain intent text in the
+  AA_V43_1–5  Precision-ranking — Gap 1 fix: include plain intent text in the
               assistant content field of the tool-call message so the model
               does not pre-compute values in its thought before seeing the
-              tool result.
+              tool result. 5 examples across 4 datasets (A-E), 5 different
+              query phrasings.
 
   AC_V43_1–2  Pairwise cluster comparison — Gap 2 fix: relative language only
               when comparing two clusters; superlatives only when all clusters
               are in scope.
 
-  AC_V43_3–5  Cluster ranking — Gap 3 fix: ranking queries answered directly
-              from [PREVIOUS CLUSTERING RESULT] with no tool call.
+  AC_V43_3–9  Cluster ranking — Gap 3 fix: ranking queries answered directly
+              from [PREVIOUS CLUSTERING RESULT] with no tool call. 7 examples
+              covering highest/lowest across all 6 stat fields.
 
-Combined: aria_train_combined_v42_full.jsonl (base 1017) + 8 new = 1025
+Combined: aria_train_combined_v42_full.jsonl (base 1017) + 14 new = 1031
 """
 
 import json, pathlib, sys
@@ -129,6 +131,70 @@ examples.append({"messages": [
 ]})
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Dataset E — Burst in Originator Activity wins precision at 34.5%
+# ═══════════════════════════════════════════════════════════════════════════
+
+_LIST_E = (
+    "=== PRE-COMPUTED RULE LIST (copy this verbatim) ===\n"
+    "Available AML rules with SAR/FP performance (detailed table shown in chart below):\n"
+    "NOTE: This is the COMPLETE list of rules in the system. Do NOT add or infer any rules not listed here.\n"
+    "  Activity Deviation (ACH): alerts=345, SAR=56, FP=289, precision=16.2%, sweep_params=[floor_amount, z_threshold]\n"
+    "  Activity Deviation (Check): alerts=215, SAR=40, FP=175, precision=18.6%, sweep_params=[floor_amount, z_threshold]\n"
+    "  Elder Abuse: alerts=385, SAR=64, FP=321, precision=16.6%, sweep_params=[floor_amount, z_threshold, age_threshold]\n"
+    "  Velocity Single: alerts=265, SAR=51, FP=214, precision=19.2%, sweep_params=[pair_total, ratio_tolerance]\n"
+    "  Detect Excessive Transaction Activity: alerts=365, SAR=55, FP=310, precision=15.1%, sweep_params=[floor_amount, time_window]\n"
+    "  Structuring (Incoming Cash): alerts=285, SAR=49, FP=236, precision=17.2%, sweep_params=[daily_floor, days_required]\n"
+    "  Structuring (Outgoing Cash): alerts=245, SAR=40, FP=205, precision=16.3%, sweep_params=[daily_floor, days_required]\n"
+    "  CTR Client: alerts=445, SAR=63, FP=382, precision=14.2%, sweep_params=[floor_amount]\n"
+    "  Burst in Originator Activity: alerts=145, SAR=50, FP=95, precision=34.5%, sweep_params=[floor_amount, min_transactions]\n"
+    "  Burst in Beneficiary Activity: alerts=195, SAR=34, FP=161, precision=17.4%, sweep_params=[floor_amount, min_transactions]\n"
+    "  Risky International Transfer: alerts=155, SAR=35, FP=120, precision=22.6%, sweep_params=[floor_amount]\n"
+    "  Activity Deviation (Wire): alerts=160, SAR=28, FP=132, precision=17.5%, sweep_params=[floor_amount, z_threshold]\n"
+    "  Velocity Multiple: alerts=190, SAR=35, FP=155, precision=18.4%, sweep_params=[pair_total, min_counterparties]\n"
+    "  Funnel Account: alerts=175, SAR=36, FP=139, precision=20.6%, sweep_params=[floor_amount, min_counterparties]\n"
+    "  Round-trip: alerts=115, SAR=28, FP=87, precision=24.3%, sweep_params=[floor_amount, return_window]\n"
+    "  Human Trafficking Indicators: alerts=95, SAR=18, FP=77, precision=18.9%, sweep_params=[floor_amount, days_required]\n"
+    "=== END RULE LIST ==="
+)
+PC_LIST_E = "Tool result for list_rules:\n" + _LIST_E
+
+# AA_V43_4: "worst FP ratio" query — Dataset C (CTR Client worst at 13.5%)
+examples.append({"messages": [
+    {"role": "system", "content": THRESHOLD_SYSTEM},
+    {"role": "user",   "content": "Which rules are generating the most false positives relative to SARs?"},
+    {"role": "assistant",
+     "content": "I will call list_rules to retrieve the current rule performance data.",
+     "tool_calls": [tc("aa_v43_4", "list_rules", {})]},
+    {"role": "tool", "tool_call_id": "aa_v43_4", "content": PC_LIST_C},
+    {"role": "assistant", "content": (
+        "### AML Rule Performance Overview\n\n"
+        + _LIST_C + "\n\n"
+        "The rules with the worst false positive ratio (lowest precision) are:\n"
+        "1. **CTR Client** — 13.5% precision (372 FP per 58 SAR)\n"
+        "2. **Burst in Beneficiary Activity** — 15.1% (174 FP per 31 SAR)\n"
+        "3. **Detect Excessive Transaction Activity** — 15.5% (338 FP per 62 SAR)\n\n"
+        "These are the highest-priority candidates for threshold tightening."
+    )},
+]})
+
+# AA_V43_5: "best hit rate" query — Dataset E (Burst in Originator wins at 34.5%)
+examples.append({"messages": [
+    {"role": "system", "content": THRESHOLD_SYSTEM},
+    {"role": "user",   "content": "Which rule has the best hit rate?"},
+    {"role": "assistant",
+     "content": "I will call list_rules to check the rule statistics.",
+     "tool_calls": [tc("aa_v43_5", "list_rules", {})]},
+    {"role": "tool", "tool_call_id": "aa_v43_5", "content": PC_LIST_E},
+    {"role": "assistant", "content": (
+        "### AML Rule Performance Overview\n\n"
+        + _LIST_E + "\n\n"
+        "Burst in Originator Activity has the best hit rate at 34.5% (50 SAR, 95 FP) — "
+        "meaning roughly 1 in 3 alerts it generates is a confirmed SAR customer. "
+        "Round-trip (24.3%) and Risky International Transfer (22.6%) follow."
+    )},
+]})
+
+# ═══════════════════════════════════════════════════════════════════════════
 # AC_V43_1–2  Pairwise cluster comparison — Gap 2 fix
 #
 # Pattern rule:
@@ -214,6 +280,46 @@ examples.append({"messages": [
     {"role": "assistant", "content": (
         "From the clustering result above, Cluster 3 is the largest segment with **156** customers, "
         "followed by Cluster 1 (**121**), Cluster 4 (**110**), and Cluster 2 (**98**)."
+    )},
+]})
+
+# AC_V43_6: ranking by current balance
+examples.append({"messages": [
+    {"role": "system",    "content": SEGMENTATION_SYSTEM},
+    {"role": "user",      "content": prev_context(_CLUSTER_STATS) + "\nWhich cluster has the highest current balance?"},
+    {"role": "assistant", "content": (
+        "From the clustering result above, Cluster 4 has the highest average current balance at **$148,000**, "
+        "followed by Cluster 2 (**$62,300**), Cluster 3 (**$31,100**), and Cluster 1 (**$18,500**)."
+    )},
+]})
+
+# AC_V43_7: ranking by account tenure
+examples.append({"messages": [
+    {"role": "system",    "content": SEGMENTATION_SYSTEM},
+    {"role": "user",      "content": prev_context(_CLUSTER_STATS) + "\nWhich cluster has the longest account tenure?"},
+    {"role": "assistant", "content": (
+        "From the clustering result above, Cluster 4 has the longest average account tenure at **9.2 years**, "
+        "followed by Cluster 2 (**7.3 years**), Cluster 3 (**5.8 years**), and Cluster 1 (**4.1 years**)."
+    )},
+]})
+
+# AC_V43_8: ranking lowest income (tests lowest-end superlative too)
+examples.append({"messages": [
+    {"role": "system",    "content": SEGMENTATION_SYSTEM},
+    {"role": "user",      "content": prev_context(_CLUSTER_STATS) + "\nWhich cluster has the lowest income?"},
+    {"role": "assistant", "content": (
+        "From the clustering result above, Cluster 1 has the lowest average income at **$72,000**, "
+        "followed by Cluster 3 (**$98,000**), Cluster 2 (**$145,000**), and Cluster 4 (**$312,000**)."
+    )},
+]})
+
+# AC_V43_9: ranking lowest weekly transaction amount
+examples.append({"messages": [
+    {"role": "system",    "content": SEGMENTATION_SYSTEM},
+    {"role": "user",      "content": prev_context(_CLUSTER_STATS) + "\nWhich cluster has the lowest average transaction amount?"},
+    {"role": "assistant", "content": (
+        "From the clustering result above, Cluster 1 has the lowest average weekly transaction amount at **$1,205**, "
+        "followed by Cluster 3 (**$2,914**), Cluster 2 (**$4,310**), and Cluster 4 (**$8,750**)."
     )},
 ]})
 
