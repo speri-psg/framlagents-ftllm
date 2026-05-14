@@ -392,7 +392,8 @@ class OrchestratorAgent:
             q = query.lower()
             if any(w in q for w in ["threshold", "sweep", "fp", "fn", "sar", "heatmap", "rule", "alert", "tuning", "backtest",
                                       "avg_trxns_week", "avg_trxn_amt", "trxn_amt_monthly",
-                                      "false positive", "false negative", "true positive", "true negative", "2d grid", "2d sweep"]):
+                                      "false positive", "false negative", "true positive", "true negative",
+                                      "2d grid", "2d sweep", "2d analysis", "grid analysis"]):
                 labels = ["threshold"]
             elif any(w in q for w in ["cluster", "segment", "k-means", "kmeans", "treemap"]):
                 labels = ["segmentation"]

@@ -81,7 +81,7 @@ class TestToolsDefinition:
     EXPECTED_TOOLS = {
         "threshold_tuning", "segment_stats", "sar_backtest",
         "rule_2d_sweep", "list_rules", "rule_sar_backtest",
-        "cluster_rule_summary",
+        "cluster_rule_summary", "cluster_threshold_analysis",
     }
 
     def _tool_names(self):

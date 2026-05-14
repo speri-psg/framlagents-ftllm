@@ -31,7 +31,7 @@ OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL",
 
 # ── LLM generation parameters ────────────────────────────────────────────────
 MAX_TOKENS_TOOL   = int(os.getenv("MAX_TOKENS_TOOL",   "2048"))  # threshold / segmentation agents
-MAX_TOKENS_POLICY = int(os.getenv("MAX_TOKENS_POLICY", "2048"))  # policy agent (longer KB responses)
+MAX_TOKENS_POLICY = int(os.getenv("MAX_TOKENS_POLICY", "4096"))  # policy agent (longer KB responses)
 MAX_TOOL_CALLS    = int(os.getenv("MAX_TOOL_CALLS",    "6"))      # max agentic loop iterations
 
 # ── Data directory ─────────────────────────────────────────────────────────────

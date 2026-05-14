@@ -399,13 +399,14 @@ def perform_clustering(df, customer_type=None, n_clusters=4):
     # ── Stats ────────────────────────────────────────────────────────────
     _COL_DISPLAY = {
         'avg_num_trxns':        'Avg Weekly Transactions',
-        'avg_weekly_trxn_amt':  'Avg Weekly Txn Amount ($)',
-        'trxn_amt_monthly':     'Monthly Txn Volume ($)',
-        'INCOME':               'Income ($)',
-        'CURRENT_BALANCE':      'Current Balance ($)',
+        'avg_weekly_trxn_amt':  'Avg Weekly Txn Amount',
+        'trxn_amt_monthly':     'Monthly Txn Volume',
+        'INCOME':               'Income',
+        'CURRENT_BALANCE':      'Current Balance',
         'ACCT_AGE_YEARS':       'Account Age (years)',
         'AGE':                  'Age',
     }
+    _DOLLAR_COLS = {'avg_weekly_trxn_amt', 'trxn_amt_monthly', 'INCOME', 'CURRENT_BALANCE'}
 
     n_num         = len(numeric_cols)
     n_cat_encoded = len(df_encoded.columns)
@@ -434,7 +435,8 @@ def perform_clustering(df, customer_type=None, n_clusters=4):
             val = c[col].median()
             if not (val != val):  # skip NaN
                 label = _COL_DISPLAY.get(col, col)
-                stats_lines.append(f"- {label}: **{val:,.1f}**")
+                fmt = f"${val:,.0f}" if col in _DOLLAR_COLS else f"{val:,.1f}"
+                stats_lines.append(f"- {label}: **{fmt}**")
         stats_lines.append("")  # blank line after each cluster block
 
     stats_lines.append("=== END PRE-COMPUTED CLUSTER STATS ===")
