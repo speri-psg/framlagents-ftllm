@@ -482,8 +482,19 @@ class OrchestratorAgent:
                 _has_cluster_ref = re.search(r'\bcluster\s*\d+\b', q_lower)
                 # Also catch bare "how about cluster 4" where the number appears without "cluster N" prefix
                 _is_followup = _has_cluster_ref and any(w in q_lower for w in _followup_words)
+                # Also inject for attribute questions that don't name a specific cluster number
+                # e.g. "Which cluster has the highest age?", "What is the average income per cluster?"
+                _attribute_words = [
+                    "highest", "lowest", "oldest", "youngest", "most", "least",
+                    "average", "avg", "mean", "rank", "age", "income", "balance",
+                    "account age", "tenure", "what is the", "how does",
+                ]
+                _asking_about_attr = (
+                    ("which cluster" in q_lower or "what cluster" in q_lower or "which segment" in q_lower)
+                    or ("cluster" in q_lower and any(w in q_lower for w in _attribute_words))
+                )
                 _cluster_ctx = last_cluster_result or last_assistant
-                if _is_followup and "Cluster" in _cluster_ctx:
+                if (_is_followup or _asking_about_attr) and "Cluster" in _cluster_ctx:
                     context = f"[PREVIOUS CLUSTERING RESULT]\n{_cluster_ctx}\n[END PREVIOUS RESULT]"
                     print("[orchestrator] injecting previous cluster context for follow-up")
             return agent.run(query, tool_executor, context, history)

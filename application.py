@@ -9,6 +9,9 @@ Override the LLM endpoint if needed:
     set OLLAMA_MODEL=qwen2.5:7b
 """
 
+import io
+import base64
+import datetime
 import json
 import re
 import time
@@ -1009,6 +1012,79 @@ def tool_executor(tool_name, tool_input):
     return f"Unknown tool: {tool_name}", None
 
 
+# ── Chat export ──────────────────────────────────────────────────────────────
+
+def _add_formatted_runs(paragraph, text):
+    """Split text on **bold** markers and add styled runs to a docx paragraph."""
+    parts = re.split(r'(\*\*[^*]+\*\*)', text)
+    for part in parts:
+        if part.startswith('**') and part.endswith('**'):
+            paragraph.add_run(part[2:-2]).bold = True
+        else:
+            paragraph.add_run(part)
+
+
+def _messages_to_docx(messages) -> bytes:
+    """Convert chat message list to a Word (.docx) document and return raw bytes."""
+    import docx as _docx
+    from docx.shared import Pt, RGBColor
+
+    doc = _docx.Document()
+    doc.core_properties.title = "ARIA Analysis Session"
+
+    title = doc.add_heading("ARIA Analysis Session", level=0)
+    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    sub = doc.add_paragraph(f"Exported: {ts}")
+    if sub.runs:
+        sub.runs[0].font.color.rgb = RGBColor(0x88, 0x88, 0x88)
+    doc.add_paragraph()
+
+    for msg in messages:
+        role    = msg.get("role", "")
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            content = " ".join(
+                b.get("text", "") for b in content
+                if isinstance(b, dict) and b.get("type") == "text"
+            )
+        if not content:
+            continue
+
+        # Role header
+        label_para = doc.add_paragraph()
+        label_run  = label_para.add_run("You" if role == "user" else "ARIA")
+        label_run.bold = True
+        label_run.font.size = Pt(10)
+        label_run.font.color.rgb = (
+            RGBColor(0x1a, 0x73, 0xe8) if role == "user" else RGBColor(0x1e, 0x88, 0x5a)
+        )
+
+        # Content — line by line with basic markdown handling
+        for line in content.split("\n"):
+            s = line.rstrip()
+            if s.startswith("### "):
+                doc.add_heading(s[4:], level=3)
+            elif s.startswith("## "):
+                doc.add_heading(s[3:], level=2)
+            elif s.startswith("# "):
+                doc.add_heading(s[2:], level=1)
+            elif s.startswith(("- ", "* ")):
+                p = doc.add_paragraph(style="List Bullet")
+                _add_formatted_runs(p, s[2:])
+            elif s in ("---", "***", "___"):
+                doc.add_paragraph()
+            else:
+                p = doc.add_paragraph()
+                _add_formatted_runs(p, s)
+
+        doc.add_paragraph()  # spacer between turns
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+
 # ── Message compaction ───────────────────────────────────────────────────────
 _MAX_CHAT_MESSAGES = 30
 
@@ -1160,8 +1236,7 @@ def _chart_content(tool_name, tool_input, fig):
             continue
         fig_h = f.layout.height if f.layout.height else 460
         chart_list.append({"title": label, "figure": f.to_dict(), "height": fig_h})
-    if chart_list:
-        blocks.append({"type": "text", "text": "See chart/table below."})
+    # Do not inject "See chart/table below." — chart renders in UI; injecting pollutes model history.
 
     return blocks, chart_list
 
@@ -1271,6 +1346,14 @@ _sidebar = dbc.Card([
 ], className="h-100 overflow-auto", style={"fontSize": "0.85rem"})
 
 _chat_panel = html.Div([
+    # Toolbar
+    html.Div([
+        dbc.ButtonGroup([
+            dbc.Button("New Chat",  id="new-chat-btn",  color="secondary", outline=True, size="sm"),
+            dbc.Button("Save Chat", id="save-chat-btn", color="secondary", outline=True, size="sm"),
+        ]),
+    ], className="px-3 py-1 d-flex justify-content-end",
+       style={"borderBottom": "1px solid #dee2e6", "background": "#f8f9fa"}),
     html.Div([
         ChatComponent(
             id="chat-component",
@@ -1377,6 +1460,8 @@ app.layout = dbc.Container([
         dbc.Col(_chat_panel, width=9, className="ps-2"),
     ], className="g-0"),
 
+    # Download anchor for chat export
+    dcc.Download(id="chat-download"),
     # Store for pending prompt from sidebar buttons
     dcc.Store(id="pending-prompt", data=None),
     dcc.Store(id="scroll-dummy"),
@@ -1526,8 +1611,6 @@ def toggle_about(n_clicks, is_open):
     prevent_initial_call=True,
 )
 def show_welcome(n):
-    with open(r"C:\Users\Aaditya\PycharmProjects\framlagents-ftllm\diag_welcome.txt", "a") as _f:
-        _f.write(f"show_welcome called n={n}\n")
     return INITIAL_MESSAGES
 
 
@@ -1818,16 +1901,27 @@ def handle_chat(new_message, pending_prompt, messages):
     agent_text = re.sub(r'\$\\le\$',  '≤', agent_text)
     agent_text = re.sub(r'\$\\gt\$',  '>',  agent_text)
     agent_text = re.sub(r'\$\\lt\$',  '<',  agent_text)
-    agent_text = re.sub(r'===.*?PRE-COMPUTED SAR BACKTEST.*?===.*?===\s*END PRE-COMPUTED SAR BACKTEST\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
-    agent_text = re.sub(r'===.*?PRE-COMPUTED RULE SWEEP.*?===.*?===\s*END RULE SWEEP\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
-    agent_text = re.sub(r'===.*?PRE-COMPUTED RULE LIST.*?===.*?===\s*END RULE LIST\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
-    agent_text = re.sub(r'===.*?PRE-COMPUTED 2D SWEEP.*?===.*?===\s*END 2D SWEEP\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
+    # Strip PRE-COMPUTED blocks — with === markers (primary) then without (fallback)
+    agent_text = re.sub(r'===.*?PRE-COMPUTED SAR BACKTEST.*?===.*?===\s*END PRE-COMPUTED SAR BACKTEST\s*===\n?', '', agent_text, flags=re.DOTALL).strip()
+    agent_text = re.sub(r'PRE-COMPUTED SAR BACKTEST.*?(?:===\s*END PRE-COMPUTED SAR BACKTEST\s*===\s*|END PRE-COMPUTED SAR BACKTEST\s*===\s*)', '', agent_text, flags=re.DOTALL).strip()
+    agent_text = re.sub(r'===.*?PRE-COMPUTED RULE SWEEP.*?===.*?===\s*END RULE SWEEP\s*===\n?', '', agent_text, flags=re.DOTALL).strip()
+    agent_text = re.sub(r'PRE-COMPUTED RULE SWEEP.*?(?:===\s*END RULE SWEEP\s*===\s*|END RULE SWEEP\s*===\s*)', '', agent_text, flags=re.DOTALL).strip()
+    agent_text = re.sub(r'(?:===\s*)?END RULE SWEEP\s*===\s*', '', agent_text).strip()
+    agent_text = re.sub(r'===.*?PRE-COMPUTED RULE LIST.*?===.*?===\s*END RULE LIST\s*===\n?', '', agent_text, flags=re.DOTALL).strip()
+    agent_text = re.sub(r'Available AML rules with SAR/FP performance.*?END RULE LIST\s*===\s*', '', agent_text, flags=re.DOTALL).strip()
+    agent_text = re.sub(r'(?:===\s*)?END RULE LIST\s*===\s*', '', agent_text).strip()
+    agent_text = re.sub(r'===.*?PRE-COMPUTED SEGMENT STATS.*?===.*?===\s*END PRE-COMPUTED SEGMENT STATS\s*===\n?', '', agent_text, flags=re.DOTALL).strip()
+    agent_text = re.sub(r'PRE-COMPUTED SEGMENT STATS.*?(?:===\s*END PRE-COMPUTED SEGMENT STATS\s*===\s*|END PRE-COMPUTED SEGMENT STATS\s*===\s*)', '', agent_text, flags=re.DOTALL).strip()
+    agent_text = re.sub(r'===.*?PRE-COMPUTED 2D SWEEP.*?===.*?===\s*END 2D SWEEP\s*===\n?', '', agent_text, flags=re.DOTALL).strip()
+    agent_text = re.sub(r'PRE-COMPUTED 2D SWEEP.*?(?:===\s*END 2D SWEEP\s*===\s*|END 2D SWEEP\s*===\s*)', '', agent_text, flags=re.DOTALL).strip()
     agent_text = re.sub(r'2D SWEEP[^\n]*Copy this verbatim[^\n]*\n?', '', agent_text, flags=re.IGNORECASE).strip()
-    # Catch any remaining PRE-COMPUTED lines not matched by the patterns above
-    # e.g. "PRE-COMPUTED SAR BACKTEST (copy this verbatim, do not alter numbers) ==="
+    # Catch any remaining PRE-COMPUTED header lines (single-line remnants)
     agent_text = re.sub(r'^PRE-COMPUTED [^\n]+\n?', '', agent_text, flags=re.MULTILINE).strip()
     # Strip leaked instruction phrases and model meta-complaints
     agent_text = re.sub(r'^(Displaying|Tool call successful)[^\n]*\n?', '', agent_text, flags=re.MULTILINE | re.IGNORECASE).strip()
+    # Strip stale "See chart/table below." that old training examples taught the model to emit
+    agent_text = re.sub(r'\bSee chart/table below\.\s*', '', agent_text, flags=re.IGNORECASE).strip()
+    agent_text = re.sub(r'\*\(Detailed sweep chart shown below\.\)\*\s*', '', agent_text, flags=re.IGNORECASE).strip()
     agent_text = re.sub(r'\[/PRE-COMPUTED RESULTS\]\s*', '', agent_text).strip()
     agent_text = re.sub(r'\[/Tool Output\]\s*', '', agent_text).strip()
     agent_text = re.sub(r'\[Tool Output\]\s*', '', agent_text).strip()
@@ -1859,57 +1953,36 @@ def handle_chat(new_message, pending_prompt, messages):
     # Strip leading punctuation artifacts (e.g. stray ] or ] \n left by token cleanup)
     agent_text = re.sub(r'^[\]\[)\s]+', '', agent_text).strip()
 
-    # list_rules: ignore model text entirely; compute correct insight server-side.
+    # list_rules: strip the ### header (chart replaces it), prepend standard header,
+    # and trust the model's insight sentence. Fall back server-side only if model returned empty.
     if any(name == "list_rules" for name, _, _ in chart_results):
-        insight = ""
-        if DF_RULE_SWEEP is not None:
-            q_lower_lr = (query or "").lower()
-            _fn_question = any(w in q_lower_lr for w in [
-                "false negative", " fn ", "most fn", "highest fn", "missed sar",
-                "miss sar", "low sar", "fewest sar", "low precision", "worst precision",
-            ])
-            _sar_question = any(w in q_lower_lr for w in [
-                "highest sar", "most sar", "best sar", "top sar", "highest catch",
-                "most catches", "best catch", "most true positive", "highest true",
-            ])
-            if _fn_question:
-                sar_by_rule = (
-                    DF_RULE_SWEEP[DF_RULE_SWEEP["is_sar"] == 1]
-                    .groupby("risk_factor")
-                    .size()
-                    .sort_values(ascending=True)
+        # Strip any ### header line the model emitted (we prepend our own)
+        agent_text = re.sub(r'^###[^\n]*\n+', '', (agent_text or "")).strip()
+        if not agent_text:
+            _rule_num_match = re.search(r'\brule\s+(\d+)\b', (query or "").lower())
+            if _rule_num_match and DF_RULE_SWEEP is not None:
+                rule_num = _rule_num_match.group(1)
+                rule_names = sorted(DF_RULE_SWEEP["risk_factor"].unique().tolist())
+                names_str = ", ".join(rule_names)
+                agent_text = (
+                    f"There is no rule called 'rule {rule_num}' — rules are identified by name, not number. "
+                    f"The {len(rule_names)} available rules are: {names_str}. "
+                    f"Please specify the rule by name."
                 )
-                bottom3 = sar_by_rule.head(3)
-                if len(bottom3):
-                    parts = [f"{rf} ({sar:,} SAR caught)" for rf, sar in bottom3.items()]
-                    insight = "Rules catching the fewest SARs (potential high false negative rate): " + ", ".join(parts) + "."
-            elif _sar_question:
-                sar_by_rule = (
-                    DF_RULE_SWEEP[DF_RULE_SWEEP["is_sar"] == 1]
-                    .groupby("risk_factor")
-                    .size()
-                    .sort_values(ascending=False)
-                )
-                top3 = sar_by_rule.head(3)
-                if len(top3):
-                    parts = [f"{rf} ({sar:,} SAR caught)" for rf, sar in top3.items()]
-                    insight = "Rules with the highest SAR catch count: " + ", ".join(parts) + "."
             else:
-                fp_by_rule = (
-                    DF_RULE_SWEEP[DF_RULE_SWEEP["is_sar"] == 0]
-                    .groupby("risk_factor")
-                    .size()
-                    .sort_values(ascending=False)
-                )
-                top3 = fp_by_rule.head(3)
-                if len(top3):
-                    parts = [f"{rf} ({fp:,} FP)" for rf, fp in top3.items()]
-                    insight = "Rules with the most false positives: " + ", ".join(parts) + "."
-        agent_text = (
-            f"Rule performance summary — detailed table shown below.\n\n{insight}"
-            if insight else
-            "Rule performance summary — detailed table shown below."
-        )
+                insight = "Rule performance summary — detailed table shown below."
+                if DF_RULE_SWEEP is not None:
+                    fp_by_rule = (
+                        DF_RULE_SWEEP[DF_RULE_SWEEP["is_sar"] == 0]
+                        .groupby("risk_factor").size().sort_values(ascending=False)
+                    )
+                    top3 = fp_by_rule.head(3)
+                    if len(top3):
+                        parts = [f"{rf} ({fp:,} FP)" for rf, fp in top3.items()]
+                        insight += "\n\nRules with the most false positives: " + ", ".join(parts) + "."
+                agent_text = insight
+        else:
+            agent_text = f"Rule performance summary — detailed table shown below.\n\n{agent_text}"
 
     # If model returned empty/whitespace after a tool call, generate a
     # data-driven insight server-side rather than a generic fallback.
@@ -1954,10 +2027,46 @@ def handle_chat(new_message, pending_prompt, messages):
 
         elif first_tool in ("ds_cluster_analysis", "cluster_analysis"):
             ct = first_input.get("customer_type", "All")
-            agent_text = (
-                f"Clustering complete for **{ct}** customers. "
-                "Use **Segment Customer Drilldown** and **Cluster Scatter Plot** in the left sidebar to explore."
-            )
+            # Try to answer attribute questions from the stats block before falling back to generic text
+            _attr_map = [
+                (["age", "account age", "oldest", "youngest", "tenure"], "Account Age (years)"),
+                (["income"],                                               "Income"),
+                (["balance"],                                              "Current Balance"),
+                (["transaction amount", "avg transaction amount"],         "Avg Transaction Amount"),
+                (["transaction volume", "monthly volume", "monthly transaction"], "Monthly Transaction Volume"),
+                (["weekly transaction", "avg weekly", "transactions per week"], "Avg Weekly Transactions"),
+            ]
+            q_l = (query or "").lower()
+            target_attr = next((lbl for kws, lbl in _attr_map if any(kw in q_l for kw in kws)), None)
+            stats_text  = _last_cluster_raw_stats or ""
+            parsed = {}
+            if target_attr and stats_text:
+                cur = None
+                for line in stats_text.split("\n"):
+                    cm = re.search(r'\*\*Cluster (\d+)\*\*', line)
+                    if cm:
+                        cur = int(cm.group(1))
+                    elif cur and target_attr in line:
+                        vm = re.search(r'\*\*\$?([\d,]+\.?\d*)\*\*', line)
+                        if vm:
+                            parsed[cur] = float(vm.group(1).replace(",", ""))
+            if parsed:
+                _hi = any(w in q_l for w in ["highest", "most", "oldest", "largest", "max", "best", "top"])
+                _lo = any(w in q_l for w in ["lowest", "least", "youngest", "smallest", "min", "worst"])
+                if _hi:
+                    c = max(parsed, key=parsed.get)
+                    agent_text = f"Cluster {c} has the highest {target_attr}: **{parsed[c]:,.1f}**."
+                elif _lo:
+                    c = min(parsed, key=parsed.get)
+                    agent_text = f"Cluster {c} has the lowest {target_attr}: **{parsed[c]:,.1f}**."
+                else:
+                    parts = [f"Cluster {c}: {v:,.1f}" for c, v in sorted(parsed.items())]
+                    agent_text = f"{target_attr} by cluster: " + ", ".join(parts) + "."
+            else:
+                agent_text = (
+                    f"Clustering complete for **{ct}** customers. "
+                    "Use **Segment Customer Drilldown** and **Cluster Scatter Plot** in the left sidebar to explore."
+                )
 
         else:
             agent_text = "Results shown below."
@@ -2504,6 +2613,35 @@ def show_network_graph(active_cell, table_data, is_open):
         feat_fig = _empty
 
     return True, net_fig, feat_fig, badge
+
+
+# ── New Chat ──────────────────────────────────────────────────────────────────
+@callback(
+    Output("chat-component", "messages", allow_duplicate=True),
+    Output("cluster-result-store", "data", allow_duplicate=True),
+    Input("new-chat-btn", "n_clicks"),
+    prevent_initial_call=True,
+)
+def new_chat(_):
+    global _last_cluster_result, _last_cluster_raw_stats
+    _last_cluster_result    = ""
+    _last_cluster_raw_stats = ""
+    return [], ""
+
+
+# ── Save Chat ─────────────────────────────────────────────────────────────────
+@callback(
+    Output("chat-download", "data"),
+    Input("save-chat-btn", "n_clicks"),
+    State("chat-component", "messages"),
+    prevent_initial_call=True,
+)
+def save_chat(_, messages):
+    if not messages:
+        return no_update
+    docx_bytes = _messages_to_docx(messages)
+    filename   = f"aria_session_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.docx"
+    return dcc.send_bytes(docx_bytes, filename)
 
 
 if __name__ == "__main__":

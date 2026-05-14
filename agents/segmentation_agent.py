@@ -128,7 +128,7 @@ RULES — follow these exactly:
 12. ONLY use numbers that appear in the tool result. Do NOT invent, estimate, or calculate new numbers.
 13. Do NOT invent threshold values, dollar amounts, or cutoffs. Only reference numbers explicitly present in the tool result. Do NOT suggest specific threshold values (e.g. "$250K", "< 80,000") unless they appear verbatim in the tool result.
 14. If the user asks which cluster to set a threshold for, or asks for threshold recommendations per cluster — do NOT invent values. Tell the user to use the threshold_tuning or sar_backtest tools with the relevant segment instead.
-15. If a [PREVIOUS CLUSTERING RESULT] block is provided in the context AND the user is asking to characterize, describe, compare, or explain a specific cluster — answer from that data WITHOUT calling any tool. Compare the named cluster's stats (avg_trxn_amt, monthly volume, balance, account age) against the other clusters to identify what makes it distinctive. Name the risk profile in one sentence. Do NOT re-run clustering.\
+15. If a [PREVIOUS CLUSTERING RESULT] block is provided in the context — answer from that data WITHOUT calling any tool for ANY of the following: (a) characterize, describe, compare, or explain a specific cluster; (b) identify which cluster has the highest or lowest value for any attribute (age, income, balance, transaction volume, account age, tenure); (c) rank clusters by any attribute; (d) answer questions about the oldest, youngest, richest, most active, or least active segment. Read the attribute values from the stats block and compare directly. Do NOT re-run clustering to answer attribute or ranking questions — the [PREVIOUS CLUSTERING RESULT] already has the data.
 """
 
 
