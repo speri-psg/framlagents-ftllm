@@ -288,8 +288,8 @@ class OrchestratorAgent:
             print("[orchestrator] keyword override → threshold (dataset summary / count query)")
 
         is_segmentation = (
-            any(w in q_lower for w in ["cluster", "segment", "k-means", "kmeans", "treemap"])
-            or _fuzzy(_words, ["cluster", "clustering", "segment", "segmentation", "kmeans"])
+            any(w in q_lower for w in ["cluster", "k-means", "kmeans", "treemap"])
+            or _fuzzy(_words, ["cluster", "clustering", "segmentation", "kmeans"])
         )
         is_threshold = (
             any(w in q_lower for w in ["sweep", "fp", "fn", "sar", "heatmap", "backtest", "tuning", "threshold", "2d grid", "2d analysis", "grid analysis", "true positive", "true negative"])
