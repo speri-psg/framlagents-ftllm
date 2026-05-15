@@ -1552,7 +1552,6 @@ app.layout = dbc.Container([
             dcc.Graph(
                 id="scatter-offcanvas-graph",
                 config={"responsive": True},
-                useResizeHandler=True,
                 style={"height": "480px", "width": "100%"},
             ),
         ],
