@@ -512,7 +512,7 @@ class OrchestratorAgent:
                     results[name] = future.result()
                 except Exception as e:
                     print(f"[orchestrator] agent '{name}' error: {e}")
-                    results[name] = (f"[{name} agent error: {e}]", [])
+                    results[name] = ("Something went wrong — please try again.", [])
 
         all_charts = []
         text_parts = []

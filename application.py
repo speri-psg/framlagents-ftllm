@@ -1260,7 +1260,7 @@ _sidebar = dbc.Card([
         html.H5([
             html.B("A"), "gentic ", html.B("R"), "isk ", html.B("I"), "ntelligence for ", html.B("AML"),
         ], className="mb-1"),
-        html.P("Powered by Aria 1.0 via Ollama", className="text-muted small mb-3"),
+        html.P("Powered by Aria via Ollama", className="text-muted small mb-3"),
 
         html.Hr(className="my-2"),
 
@@ -1405,7 +1405,7 @@ _chat_panel = html.Div([
     # React never reconciles large Plotly JSON on every keystroke.
     html.Div(id="charts-panel", className="px-3 pb-2", style={
         "overflow": "auto",
-        "maxHeight": "48vh",
+        "maxHeight": "35vh",
         "borderTop": "1px solid #dee2e6",
     }),
 ], style={
@@ -1552,7 +1552,8 @@ app.layout = dbc.Container([
             dcc.Graph(
                 id="scatter-offcanvas-graph",
                 config={"responsive": True},
-                style={"height": "480px"},
+                useResizeHandler=True,
+                style={"height": "480px", "width": "100%"},
             ),
         ],
     ),
@@ -1848,10 +1849,16 @@ def handle_chat(new_message, pending_prompt, messages):
         import traceback
         traceback.print_exc()
         err = str(e)
-        if "connection" in err.lower() or "connect" in err.lower():
-            msg_text = f"Cannot reach the model at {OLLAMA_BASE_URL}. Make sure Ollama (or vLLM) is running and the model is loaded."
+        if "connection" in err.lower() or "connect" in err.lower() or "refused" in err.lower():
+            msg_text = f"Cannot reach the model at {OLLAMA_BASE_URL}. Make sure Ollama is running and try again."
+        elif "404" in err or "not found" in err.lower():
+            msg_text = f"Model '{OLLAMA_MODEL}' was not found in Ollama. Run `ollama list` to see what is loaded."
+        elif "429" in err or "rate limit" in err.lower() or "overload" in err.lower():
+            msg_text = "The model is currently overloaded. Please wait a moment and try again."
+        elif "timeout" in err.lower() or "timed out" in err.lower():
+            msg_text = "The model took too long to respond. Try a simpler query or check if Ollama is still running."
         else:
-            msg_text = f"Sorry, something went wrong: {e}"
+            msg_text = "Something went wrong — please try again. If the problem persists, restart Ollama."
         bot_response = {"role": "assistant", "content": msg_text}
         _set_props("demo-prompt-dropdown", {"disabled": False})
         return (updated + [bot_response])[-_MAX_CHAT_MESSAGES:], no_update, no_update, no_update, no_update, {"display": "none"}
@@ -2331,15 +2338,21 @@ def toggle_scatter_offcanvas(n, is_open):
     return not is_open
 
 
-# Firefox fix: dispatch a resize event after the offcanvas animation so Plotly
-# re-measures the now-visible container and renders the scatter correctly.
+# Firefox fix: call Plotly.Plots.resize() directly on the graph element after
+# the offcanvas animation completes.  window.dispatchEvent('resize') is ignored
+# by Firefox when the element was not visible at layout time.
 app.clientside_callback(
     """
     function(is_open) {
         if (is_open) {
             setTimeout(function() {
-                window.dispatchEvent(new Event('resize'));
-            }, 350);
+                var el = document.getElementById('scatter-offcanvas-graph');
+                if (el && window.Plotly) {
+                    Plotly.Plots.resize(el);
+                } else {
+                    window.dispatchEvent(new Event('resize'));
+                }
+            }, 400);
         }
         return window.dash_clientside.no_update;
     }
@@ -2634,6 +2647,7 @@ def show_network_graph(active_cell, table_data, is_open):
     Output("chat-component", "messages", allow_duplicate=True),
     Output("cluster-result-store", "data", allow_duplicate=True),
     Output("pending-prompt", "data", allow_duplicate=True),
+    Output("chat-thinking-indicator", "style", allow_duplicate=True),
     Input("new-chat-btn", "n_clicks"),
     prevent_initial_call=True,
 )
@@ -2643,7 +2657,7 @@ def new_chat(_):
     stop_event.set()               # signals in-flight generation to abort
     _last_cluster_result    = ""
     _last_cluster_raw_stats = ""
-    return [], "", None
+    return [], "", None, {"display": "none"}
 
 
 # ── Save Chat ─────────────────────────────────────────────────────────────────
