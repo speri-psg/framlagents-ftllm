@@ -64,6 +64,7 @@ from write_v44 import (                                                # noqa: E
     _RS_ACH, PC_RS_ACH,
 )
 from write_v45 import _LIST_H, PC_LIST_H                              # noqa: E402
+from write_v45 import _CLUSTER_STATS_IND, _PC_CLUSTER_IND, _T1_IND_RESPONSE  # noqa: E402
 from write_v46 import _PC_CLUSTER_BIZ, _T1_BIZ_RESPONSE              # noqa: E402
 from write_v47 import (                                                # noqa: E402
     _AT_C_BLOCK, _AT_C_RESPONSE, _PC_AT_C,
@@ -552,6 +553,84 @@ examples.append({"messages": [
                        {"risk_factor": "Activity Deviation (ACH)", "sweep_param": "z_threshold"})]},
     {"role": "tool", "tool_call_id": "ars_v48_4", "content": PC_RS_ACH},
     {"role": "assistant", "content": _RS_ACH_RESPONSE},
+]})
+
+
+# ===========================================================================
+# AC_V48_3-5  AC header format after non-OFAC/non-SAR prior turns
+#
+# AC_V47_1-3 already cover: OFAC prior, SAR policy prior, TP/FP def prior.
+# The model still uses "Business Customer Behavioral Segments" header after
+# threshold tuning, rule list, or general BSA/AML policy prior turns.
+# Fix: 3 more examples, all using canonical "Clustering complete for X" header.
+# ===========================================================================
+
+_PRIOR_THRESHOLD = (
+    "The FP/FN crossover for Business customers at monthly transaction volume is "
+    "around $24,000 — FP=218, FN=81 at that point. "
+    "The optimal zone ($16,000–$20,000/month) keeps both FP and FN below 20% of their "
+    "maximums. Above $24,000 FN losses accelerate while FP savings diminish."
+)
+
+_PRIOR_RULE_LIST = (
+    "The system monitors the following AML rules: "
+    "Activity Deviation (ACH), Activity Deviation (Check), Elder Abuse, Velocity Single, "
+    "Detect Excessive Transaction Activity, Structuring (Incoming Cash), "
+    "Structuring (Outgoing Cash), CTR Client, Burst in Originator Activity, "
+    "Burst in Beneficiary Activity, Risky International Transfer, Activity Deviation (Wire), "
+    "Velocity Multiple, Funnel Account, Round-trip, Human Trafficking Indicators. "
+    "See the chart for the full SAR/FP breakdown."
+)
+
+_PRIOR_BSA = (
+    "The Bank Secrecy Act (BSA) requires financial institutions to maintain an effective "
+    "AML compliance program with four pillars: (1) internal policies and procedures, "
+    "(2) a designated compliance officer, (3) ongoing employee training, and "
+    "(4) independent testing. Currency Transaction Reports (CTRs) must be filed for "
+    "transactions exceeding $10,000. BSA violations can result in civil money penalties "
+    "and formal enforcement actions."
+)
+
+# AC_V48_3: threshold tuning prior → Business clustering
+examples.append({"messages": [
+    {"role": "system",    "content": SEGMENTATION_SYSTEM},
+    {"role": "user",      "content": "What is the FP/FN crossover for Business customers?"},
+    {"role": "assistant", "content": _PRIOR_THRESHOLD},
+    {"role": "user",      "content": "Now show me the behavioral segments for Business customers"},
+    {"role": "assistant",
+     "content": "Calling ds_cluster_analysis for Business customers.",
+     "tool_calls": [tc("ac_v48_3", "ds_cluster_analysis",
+                       {"customer_type": "Business", "n_clusters": 4})]},
+    {"role": "tool", "tool_call_id": "ac_v48_3", "content": _PC_CLUSTER_BIZ},
+    {"role": "assistant", "content": _T1_BIZ_RESPONSE},
+]})
+
+# AC_V48_4: rule list prior → Individual clustering
+examples.append({"messages": [
+    {"role": "system",    "content": SEGMENTATION_SYSTEM},
+    {"role": "user",      "content": "List all the AML rules in the system"},
+    {"role": "assistant", "content": _PRIOR_RULE_LIST},
+    {"role": "user",      "content": "Cluster Individual customers into behavioral groups"},
+    {"role": "assistant",
+     "content": "Calling ds_cluster_analysis for Individual customers.",
+     "tool_calls": [tc("ac_v48_4", "ds_cluster_analysis",
+                       {"customer_type": "Individual", "n_clusters": 4})]},
+    {"role": "tool", "tool_call_id": "ac_v48_4", "content": _PC_CLUSTER_IND},
+    {"role": "assistant", "content": _T1_IND_RESPONSE},
+]})
+
+# AC_V48_5: general BSA/AML policy prior → Business clustering
+examples.append({"messages": [
+    {"role": "system",    "content": SEGMENTATION_SYSTEM},
+    {"role": "user",      "content": "What are the BSA compliance requirements?"},
+    {"role": "assistant", "content": _PRIOR_BSA},
+    {"role": "user",      "content": "Run segmentation for Business customers"},
+    {"role": "assistant",
+     "content": "Calling ds_cluster_analysis for Business customers.",
+     "tool_calls": [tc("ac_v48_5", "ds_cluster_analysis",
+                       {"customer_type": "Business", "n_clusters": 4})]},
+    {"role": "tool", "tool_call_id": "ac_v48_5", "content": _PC_CLUSTER_BIZ},
+    {"role": "assistant", "content": _T1_BIZ_RESPONSE},
 ]})
 
 
