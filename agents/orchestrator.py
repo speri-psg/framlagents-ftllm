@@ -192,7 +192,7 @@ class OrchestratorAgent:
         "profile so your team can apply different monitoring intensities to different customer groups instead of "
         "treating all customers identically.\n\n"
         "**3. AML Rule Analysis**\n"
-        "I run SAR backtests and 2D parameter sweeps across your 11 active monitoring rules. A SAR backtest shows "
+        "I run SAR backtests and 2D parameter sweeps across your active monitoring rules. A SAR backtest shows "
         "how the rule's SAR catch rate changes as its threshold is adjusted. A 2D sweep maps two parameters "
         "simultaneously so you can see the full trade-off surface and identify the setting that best balances "
         "detection against false positives.\n\n"

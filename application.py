@@ -637,12 +637,15 @@ def compute_segment_stats(df):
         alerts    = int(seg["alerts"].sum())
         fp        = int(seg["false_positives"].sum())
         fn        = int(seg["false_negatives"].sum())
+        tp        = alerts - fp
         fp_rate   = round(100 * fp / alerts, 1) if alerts > 0 else 0
+        sar_rate  = round(100 * tp / alerts, 1) if alerts > 0 else 0
         acct_pct  = round(100 * n / total_accounts, 1) if total_accounts > 0 else 0
         alert_pct = round(100 * alerts / total_alerts, 1) if total_alerts > 0 else 0
         lines.append(f"**{name}**")
         lines.append(f"- Accounts: **{n:,}** ({acct_pct}% of total)")
         lines.append(f"- Alerts: **{alerts:,}** ({alert_pct}% of all alerts)")
+        lines.append(f"- SARs (True Positives): **{tp:,}** (SAR rate={sar_rate}% of alerts)")
         lines.append(f"- False Positives: **{fp:,}** (FP rate={fp_rate}% of alerts)")
         lines.append(f"- False Negatives: **{fn:,}**")
         lines.append("")
@@ -858,7 +861,7 @@ def tool_executor(tool_name, tool_input):
             return "Segmentation or SAR data not available.", None
         import lambda_cluster_threshold
         segment     = tool_input.get("segment", "Business")
-        raw_col     = tool_input.get("threshold_column", "AVG_TRXN_AMT")
+        raw_col     = tool_input.get("threshold_column", "AVG_TRXNS_WEEK")
         n_clusters  = int(tool_input.get("n_clusters", 4))
         target_rate = float(tool_input.get("target_sar_rate", 0.90))
         text, fig = lambda_cluster_threshold.cluster_threshold_analysis(
@@ -1894,10 +1897,15 @@ def handle_chat(new_message, pending_prompt, messages):
     agent_text = re.sub(r'===.*?PRE-COMPUTED CLUSTER STATS.*?===.*?===\s*END PRE-COMPUTED CLUSTER STATS\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED CLUSTER RULE SUMMARY.*?===.*?===\s*END CLUSTER RULE SUMMARY\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED CLUSTER THRESHOLD ANALYSIS[^\n]*===\n?', '', agent_text).strip()
-    agent_text = re.sub(r'===\s*END CLUSTER THRESHOLD ANALYSIS\s*===\n?', '\n\n', agent_text).strip()
+    agent_text = re.sub(r'\n?===\s*END CLUSTER THRESHOLD ANALYSIS\s*===\n?', '\n\n', agent_text).strip()
     agent_text = re.sub(r'\bPRE-COMPUTED CLUSTER THRESHOLD ANALYSIS\b\s*', '', agent_text).strip()
+    # Catch malformed END markers where leading === is missing (model drops it occasionally)
+    agent_text = re.sub(r'^END PRE-COMPUTED[^\n]*===\s*\n?', '', agent_text, flags=re.MULTILINE).strip()
+    agent_text = re.sub(r'^END CLUSTER[^\n]*===\s*\n?', '', agent_text, flags=re.MULTILINE).strip()
     agent_text = re.sub(r'^#+\s*AML Domain Insight\s*\n?', '', agent_text, flags=re.MULTILINE | re.IGNORECASE).strip()
     agent_text = re.sub(r'\*\*AML Domain Insight\*\*\s*\n?', '', agent_text, flags=re.IGNORECASE).strip()
+    # Ensure insight sentence after ADAPTIVE SUMMARY gets a paragraph break
+    agent_text = re.sub(r'(- Net change:[^\n]+)\n([A-Z])', r'\1\n\n\2', agent_text)
     # Replace LaTeX math operators — model occasionally emits $\ge$/$\le$ instead of >= / <=
     agent_text = re.sub(r'\$\\geq\$', '≥', agent_text)
     agent_text = re.sub(r'\$\\leq\$', '≤', agent_text)
@@ -1925,7 +1933,7 @@ def handle_chat(new_message, pending_prompt, messages):
     agent_text = re.sub(r'^(Displaying|Tool call successful)[^\n]*\n?', '', agent_text, flags=re.MULTILINE | re.IGNORECASE).strip()
     # Strip stale "See chart/table below." that old training examples taught the model to emit
     agent_text = re.sub(r'\bSee chart/table below\.\s*', '', agent_text, flags=re.IGNORECASE).strip()
-    agent_text = re.sub(r'\*\(Detailed sweep chart shown below\.\)\*\s*', '', agent_text, flags=re.IGNORECASE).strip()
+    agent_text = re.sub(r'\*?\(Detailed sweep (?:chart|table)[^)]*\)\*?\s*', '', agent_text, flags=re.IGNORECASE).strip()
     agent_text = re.sub(r'\[/PRE-COMPUTED RESULTS\]\s*', '', agent_text).strip()
     agent_text = re.sub(r'\[/Tool Output\]\s*', '', agent_text).strip()
     agent_text = re.sub(r'\[Tool Output\]\s*', '', agent_text).strip()

@@ -244,6 +244,7 @@ TOOLS = [
                         "enum": ["AVG_TRXNS_WEEK", "AVG_TRXN_AMT", "TRXN_AMT_MONTHLY"],
                         "description": (
                             "Column to use as the alert threshold dimension. "
+                            "If not specified, defaults to AVG_TRXNS_WEEK. "
                             "AVG_TRXN_AMT = average dollar amount per transaction. "
                             "TRXN_AMT_MONTHLY = average total monthly transaction volume. "
                             "AVG_TRXNS_WEEK = average number of transactions per week."
@@ -261,7 +262,7 @@ TOOLS = [
                         ),
                     },
                 },
-                "required": ["segment", "threshold_column"],
+                "required": ["segment"],
             },
         },
     },
@@ -306,7 +307,7 @@ RULES — follow these exactly:
 19. When the user asks about a specific behavioral cluster (e.g. "Cluster 3", "cluster 4"), pass the cluster number as an integer to the cluster parameter of rule_sar_backtest or rule_2d_sweep. Do NOT pass cluster to threshold_tuning, sar_backtest, or segment_stats — those tools do not accept a cluster parameter.
 20. ONE insight sentence only. Do NOT add a second sentence or parenthetical. Do NOT describe heatmap positions (e.g. "top-left", "highest density"). Do NOT say "zero false positives" or "zero FNs" if the PRE-COMPUTED shows FP > 0 or FN > 0.
 21. If the user asks about "highest FP rate" or "worst precision" — they mean precision=0.0%, NOT the highest raw FP count. Rules with SAR=0 and precision=0.0% have the highest FP rate. Name those rules specifically.
-22. The system contains exactly 16 AML rules. Never state a different count.
+22. Never state a rule count from memory. If the user asks how many rules the system monitors, call list_rules and count the rules in the result.
 23. After calling list_rules, if the user asked about a rule by a name that does not appear in the list (e.g. "layering", "smurfing") — state that no rule by that name exists and list the available rules by name. Do NOT guess which rule "covers" the concept.
 24. For any question about how ALL rules perform for a specific behavioral cluster — call cluster_rule_summary with the cluster number. Do NOT call list_rules or loop over rule_sar_backtest for this.
 25. If a previous tool call returned an error about an invalid sweep parameter (e.g. "Unknown sweep_param_1" or "Unknown sweep_param_2"), and you asked the user to choose a valid parameter, and the user's reply is a parameter name (e.g. floor_amount, z_threshold, age_threshold, pair_total, ratio_tolerance, time_window, min_transactions, days_required, daily_floor) — do NOT treat it as a new query. Resume the previous rule_2d_sweep or rule_sar_backtest call with the same risk_factor, keeping all valid parameters unchanged and replacing only the invalid one with the user's corrected choice.
