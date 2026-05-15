@@ -1696,6 +1696,8 @@ app.clientside_callback(
 def handle_chat(new_message, pending_prompt, messages):
     import threading as _thr
     from dash import set_props as _set_props
+    from agents.base_agent import stop_event
+    stop_event.clear()             # clear any lingering stop signal from New Chat
     ctx     = callback_context
     trigger = ctx.triggered[0]["prop_id"] if ctx.triggered else ""
     print(f"[handle_chat] enter thread={_thr.current_thread().ident} trigger={trigger} msgs={len(messages or [])}", flush=True)
@@ -2631,14 +2633,17 @@ def show_network_graph(active_cell, table_data, is_open):
 @callback(
     Output("chat-component", "messages", allow_duplicate=True),
     Output("cluster-result-store", "data", allow_duplicate=True),
+    Output("pending-prompt", "data", allow_duplicate=True),
     Input("new-chat-btn", "n_clicks"),
     prevent_initial_call=True,
 )
 def new_chat(_):
+    from agents.base_agent import stop_event
     global _last_cluster_result, _last_cluster_raw_stats
+    stop_event.set()               # signals in-flight generation to abort
     _last_cluster_result    = ""
     _last_cluster_raw_stats = ""
-    return [], ""
+    return [], "", None
 
 
 # ── Save Chat ─────────────────────────────────────────────────────────────────
