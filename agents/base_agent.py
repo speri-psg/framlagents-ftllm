@@ -317,6 +317,7 @@ class BaseAgent:
             max_tokens=MAX_TOKENS_TOOL,
             temperature=0,
             messages=messages,
+            extra_body={"repeat_penalty": 1.05},
         )
         if self.tools:
             create_kwargs["tools"] = self.tools

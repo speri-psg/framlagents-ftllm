@@ -76,6 +76,7 @@ class PolicyAgent:
             temperature=0,
             stream=True,
             messages=conv_messages,
+            extra_body={"repeat_penalty": 1.05},
         )
         parts = []
         try:

@@ -1816,7 +1816,7 @@ def handle_chat(new_message, pending_prompt, messages):
         _MAX_HIST_CHARS = 120
         _history_raw = [
             {"role": m["role"], "content": _msg_text(m)}
-            for m in messages[:-1]
+            for m in (messages[:-1] if messages and messages[-1].get("role") == "user" else messages)
             if m.get("role") in ("user", "assistant") and _msg_text(m)
         ]
         history = [
@@ -1893,7 +1893,11 @@ def handle_chat(new_message, pending_prompt, messages):
     agent_text = re.sub(r'===.*?PRE-COMPUTED SEGMENT STATS.*?===.*?===\s*END PRE-COMPUTED SEGMENT STATS\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED CLUSTER STATS.*?===.*?===\s*END PRE-COMPUTED CLUSTER STATS\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED CLUSTER RULE SUMMARY.*?===.*?===\s*END CLUSTER RULE SUMMARY\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
-    agent_text = re.sub(r'===.*?PRE-COMPUTED CLUSTER THRESHOLD ANALYSIS.*?===.*?===\s*END CLUSTER THRESHOLD ANALYSIS\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
+    agent_text = re.sub(r'===.*?PRE-COMPUTED CLUSTER THRESHOLD ANALYSIS[^\n]*===\n?', '', agent_text).strip()
+    agent_text = re.sub(r'===\s*END CLUSTER THRESHOLD ANALYSIS\s*===\n?', '\n\n', agent_text).strip()
+    agent_text = re.sub(r'\bPRE-COMPUTED CLUSTER THRESHOLD ANALYSIS\b\s*', '', agent_text).strip()
+    agent_text = re.sub(r'^#+\s*AML Domain Insight\s*\n?', '', agent_text, flags=re.MULTILINE | re.IGNORECASE).strip()
+    agent_text = re.sub(r'\*\*AML Domain Insight\*\*\s*\n?', '', agent_text, flags=re.IGNORECASE).strip()
     # Replace LaTeX math operators — model occasionally emits $\ge$/$\le$ instead of >= / <=
     agent_text = re.sub(r'\$\\geq\$', '≥', agent_text)
     agent_text = re.sub(r'\$\\leq\$', '≤', agent_text)
