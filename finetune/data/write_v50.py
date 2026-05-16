@@ -42,6 +42,16 @@ Targets:
                 (SAR/Alerted) as the available SAR-rate proxy; clarify that true
                 SAR Catch % (TP/(TP+FN)) needs rule_sar_backtest per rule.
 
+  SEG_V50_1     "which one is the most active cluster" — all Business clusters
+                tie at 1.2 Avg Weekly Transactions; model should say that and
+                pivot to monthly volume (Cluster 2 highest at $14,967) rather
+                than answering with Avg Weekly Txn Amount (wrong metric).
+
+  ARS_V50_2     "run SAR backtest on Structuring rules" (plural) → thin canned
+                response.  Correct: identify both Structuring rules, run
+                rule_sar_backtest on Structuring (Incoming Cash), note that
+                Outgoing Cash is the companion rule.
+
 Filters:
   _has_stale_rule_list    — removes 19 stale 11-rule RULE LIST examples
   _has_prefill_rule_count — removes 4 V49 ARL_V49_9-12 count examples
@@ -61,8 +71,9 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 sys.path.insert(0, str(DATA_DIR))
 
-from write_v41 import THRESHOLD_SYSTEM          # noqa: E402
-from write_v42 import tc                        # noqa: E402
+from write_v41 import THRESHOLD_SYSTEM, SEGMENTATION_SYSTEM  # noqa: E402
+from write_v42 import tc, prev_context          # noqa: E402
+from write_v44 import _RS_STRUCTURING_IN        # noqa: E402
 from write_v45 import PC_LIST_H, PC_CRS_CLUSTER4, _CRS_CLUSTER4  # noqa: E402
 from write_v47 import _AT_A_RESPONSE, _PC_AT_A  # noqa: E402
 from write_v48 import _ARL_FULL_LIST            # noqa: E402
@@ -413,6 +424,129 @@ examples.append({"messages": [
      "tool_calls": [tc("arl_v50_9a", "list_rules", {})]},
     {"role": "tool", "tool_call_id": "arl_v50_9a", "content": PC_LIST_H},
     {"role": "assistant", "content": _ARL_SAR_CATCH_RESPONSE},
+]})
+
+
+# ===========================================================================
+# SEG_V50_1  "which one is the most active cluster" — all tied at 1.2
+#
+# Live Business clustering has all 4 clusters at 1.2 Avg Weekly Transactions.
+# Model answered with "Cluster 3 has the highest Avg Weekly Txn Amount" —
+# wrong metric (amount ≠ activity/frequency).
+#
+# Correct response: acknowledge the tie by frequency, pivot to monthly volume
+# as the best available proxy for overall activity level.
+#
+# Business clusters (2026-05-16 live data):
+#   Cluster 1: 2,271 cust, 1.2 wkly, $2,914 amt, $12,134 monthly, $17,233 bal, 6.2 yr
+#   Cluster 2:    30 cust, 1.2 wkly, $3,478 amt, $14,967 monthly, $10,762 bal, 5.5 yr
+#   Cluster 3:    37 cust, 1.2 wkly, $3,126 amt, $12,767 monthly, $19,342 bal, 6.7 yr
+#   Cluster 4:    31 cust, 1.2 wkly, $2,584 amt, $10,419 monthly, $15,275 bal, 5.8 yr
+# ===========================================================================
+
+_CLUSTER_BIZ_TIED = (
+    "=== PRE-COMPUTED CLUSTER STATS (copy verbatim, do not compute new numbers) ===\n"
+    "Segment: Business | Active accounts: 2,369 (excluded 0 with no transactions)\n"
+    "Clusters: 4 | Features: 7 numeric + 57 encoded categorical (6 original)\n"
+    "PCA variance explained: PC1=5.8%, PC2=3.7%\n"
+    "\n"
+    "**Cluster 1**\n"
+    "- Customers: **2,271** (95.9% of active accounts)\n"
+    "- Avg Weekly Transactions: **1.2**\n"
+    "- Avg Weekly Txn Amount: **$2,914**\n"
+    "- Monthly Txn Volume: **$12,134**\n"
+    "- Current Balance: **$17,233**\n"
+    "- Account Age (years): **6.2**\n"
+    "\n"
+    "**Cluster 2**\n"
+    "- Customers: **30** (1.3% of active accounts)\n"
+    "- Avg Weekly Transactions: **1.2**\n"
+    "- Avg Weekly Txn Amount: **$3,478**\n"
+    "- Monthly Txn Volume: **$14,967**\n"
+    "- Current Balance: **$10,762**\n"
+    "- Account Age (years): **5.5**\n"
+    "\n"
+    "**Cluster 3**\n"
+    "- Customers: **37** (1.6% of active accounts)\n"
+    "- Avg Weekly Transactions: **1.2**\n"
+    "- Avg Weekly Txn Amount: **$3,126**\n"
+    "- Monthly Txn Volume: **$12,767**\n"
+    "- Current Balance: **$19,342**\n"
+    "- Account Age (years): **6.7**\n"
+    "\n"
+    "**Cluster 4**\n"
+    "- Customers: **31** (1.3% of active accounts)\n"
+    "- Avg Weekly Transactions: **1.2**\n"
+    "- Avg Weekly Txn Amount: **$2,584**\n"
+    "- Monthly Txn Volume: **$10,419**\n"
+    "- Current Balance: **$15,275**\n"
+    "- Account Age (years): **5.8**\n"
+    "\n"
+    "=== END PRE-COMPUTED CLUSTER STATS ==="
+)
+
+_SEG_MOST_ACTIVE_RESPONSE = (
+    "All four clusters share the same average weekly transaction frequency "
+    "(**1.2 transactions/week**), so there is no single most active cluster by that measure.\n\n"
+    "By **monthly transaction volume** — the best available proxy for overall activity:\n\n"
+    "1. **Cluster 2** — $14,967 (highest)\n"
+    "2. **Cluster 3** — $12,767\n"
+    "3. **Cluster 1** — $12,134\n"
+    "4. **Cluster 4** — $10,419 (lowest)\n\n"
+    "Cluster 2 generates the highest monthly volume despite having only 30 customers (1.3% of accounts)."
+)
+
+examples.append({"messages": [
+    {"role": "system", "content": SEGMENTATION_SYSTEM},
+    {"role": "user",   "content": "Cluster Business customers by transaction behavior"},
+    {"role": "assistant",
+     "content": "Calling ds_cluster_analysis for Business customers.",
+     "tool_calls": [tc("seg_v50_1a", "ds_cluster_analysis",
+                       {"customer_type": "Business", "n_clusters": 4})]},
+    {"role": "tool", "tool_call_id": "seg_v50_1a", "content": "Tool result for ds_cluster_analysis:\n" + _CLUSTER_BIZ_TIED},
+    {"role": "assistant", "content": "### Business Customer Segmentation by Transaction Behavior\n" + _CLUSTER_BIZ_TIED + "\n\nCluster 3 has the highest Avg Weekly Txn Amount at $3,126, indicating the highest potential exposure risk among the four segments."},
+    {"role": "user",   "content": prev_context(_CLUSTER_BIZ_TIED) + "\nwhich one is the most active cluster"},
+    {"role": "assistant", "content": _SEG_MOST_ACTIVE_RESPONSE},
+]})
+
+
+# ===========================================================================
+# ARS_V50_2  "run SAR backtest on Structuring rules" (plural) → thin response
+#
+# "Structuring rules" (plural) maps to two rules: Structuring (Incoming Cash)
+# and Structuring (Outgoing Cash).  Model gave a thin canned response instead
+# of identifying both rules and running the backtest.
+#
+# Correct: run rule_sar_backtest on Structuring (Incoming Cash) as the primary,
+# note that Structuring (Outgoing Cash) is the companion rule.
+#
+# PRE-COMPUTED block from write_v44 (_RS_STRUCTURING_IN):
+#   Current daily_floor=3,000 catches all 46 SARs (100% TP rate, 15.3% precision)
+#   Raising to 5,500: TP=26, FP=157, FN=20, precision=14.2%
+# ===========================================================================
+
+_PC_STRUCTURING_IN = "Tool result for rule_sar_backtest:\n" + _RS_STRUCTURING_IN
+
+_ARS_STRUCTURING_PLURAL_RESPONSE = (
+    "### SAR Backtest — Structuring (Incoming Cash) | daily_floor\n\n"
+    + _RS_STRUCTURING_IN + "\n\n"
+    "The system monitors **two Structuring rules** — Incoming Cash and Outgoing Cash. "
+    "Running the backtest on **Structuring (Incoming Cash)** first:\n\n"
+    "The current daily_floor of $3,000 catches all 46 SARs at 15.3% precision. "
+    "Tightening to $5,500 reduces FP by 38% (254 → 157) while retaining 56.5% SAR coverage "
+    "(26 of 46) — viable if the program accepts higher FN.\n\n"
+    "Run **rule_sar_backtest on Structuring (Outgoing Cash)** to see the companion rule's sweep."
+)
+
+examples.append({"messages": [
+    {"role": "system", "content": THRESHOLD_SYSTEM},
+    {"role": "user",   "content": "run SAR backtest on Structuring rules"},
+    {"role": "assistant",
+     "content": "Calling rule_sar_backtest for Structuring (Incoming Cash).",
+     "tool_calls": [tc("ars_v50_2a", "rule_sar_backtest",
+                       {"risk_factor": "Structuring (Incoming Cash)"})]},
+    {"role": "tool", "tool_call_id": "ars_v50_2a", "content": _PC_STRUCTURING_IN},
+    {"role": "assistant", "content": _ARS_STRUCTURING_PLURAL_RESPONSE},
 ]})
 
 
