@@ -71,7 +71,33 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 sys.path.insert(0, str(DATA_DIR))
 
-from write_v41 import THRESHOLD_SYSTEM, SEGMENTATION_SYSTEM  # noqa: E402
+from write_v41 import SEGMENTATION_SYSTEM  # noqa: E402
+
+# Import live SYSTEM_PROMPT from agents.threshold_agent without triggering the full
+# agents package chain (agents/__init__.py imports OrchestratorAgent which pulls in
+# openai and all sub-agents). We stub out agents.base_agent so the relative import
+# inside threshold_agent.py resolves without errors.
+import importlib.util as _ilu, types as _typ
+_sa  = _typ.ModuleType("agents")
+_sb  = _typ.ModuleType("agents.base_agent")
+class _DummyBase: pass
+_sb.BaseAgent = _DummyBase
+import sys as _sys2
+_sys2.modules.setdefault("agents",            _sa)
+_sys2.modules.setdefault("agents.base_agent", _sb)
+_spec = _ilu.spec_from_file_location(
+    "agents.threshold_agent",
+    DATA_DIR.parent.parent / "agents" / "threshold_agent.py",
+)
+_ta = _ilu.module_from_spec(_spec)
+_ta.__package__ = "agents"
+_spec.loader.exec_module(_ta)
+THRESHOLD_SYSTEM = _ta.SYSTEM_PROMPT
+print(f"[V50] Loaded live THRESHOLD_SYSTEM ({len(THRESHOLD_SYSTEM)} chars, has RULE INVENTORY: {'RULE INVENTORY' in THRESHOLD_SYSTEM})")
+# Remove stub modules so subsequent imports (write_v42 → agents.orchestrator) work correctly
+for _k in ["agents", "agents.base_agent", "agents.threshold_agent"]:
+    _sys2.modules.pop(_k, None)
+del _ilu, _typ, _sa, _sb, _DummyBase, _sys2, _spec, _ta, _k
 from write_v42 import tc, prev_context          # noqa: E402
 from write_v44 import _RS_STRUCTURING_IN        # noqa: E402
 from write_v45 import PC_LIST_H, PC_CRS_CLUSTER4, _CRS_CLUSTER4  # noqa: E402
@@ -128,58 +154,6 @@ At the highest value (0.10): TP=49, FP=201, FN=0, TN=0 (TP rate=100.0%, precisio
 === END RULE SWEEP ===
 (Detailed sweep table shown in the chart below.)"""
 
-
-# ===========================================================================
-# ARL_V50_1-4  Rule count queries → standard insight (no hardcoded number)
-#
-# All four phrasings that misrouted in the session (aria_session_20260515_1221)
-# or in local testing.  Each calls list_rules once; the assistant response
-# never includes a rule count — it uses the insight phrase above.
-# ===========================================================================
-
-# ARL_V50_1: exact local-test phrasing that returned "12 AML detection rules"
-examples.append({"messages": [
-    {"role": "system", "content": THRESHOLD_SYSTEM},
-    {"role": "user",   "content": "count the number of rules from list of AML rules"},
-    {"role": "assistant",
-     "content": "Calling list_rules to retrieve the active monitoring rules.",
-     "tool_calls": [tc("arl_v50_1a", "list_rules", {})]},
-    {"role": "tool", "tool_call_id": "arl_v50_1a", "content": PC_LIST_H},
-    {"role": "assistant", "content": _ARL_RULE_INSIGHT},
-]})
-
-# ARL_V50_2: "How many rules does the system monitor?" — exact session phrasing
-examples.append({"messages": [
-    {"role": "system", "content": THRESHOLD_SYSTEM},
-    {"role": "user",   "content": "How many rules does the system monitor?"},
-    {"role": "assistant",
-     "content": "Calling list_rules to retrieve the active monitoring rules.",
-     "tool_calls": [tc("arl_v50_2a", "list_rules", {})]},
-    {"role": "tool", "tool_call_id": "arl_v50_2a", "content": PC_LIST_H},
-    {"role": "assistant", "content": _ARL_RULE_INSIGHT},
-]})
-
-# ARL_V50_3: "what is the total number of rules in the system" — exact session phrasing
-examples.append({"messages": [
-    {"role": "system", "content": THRESHOLD_SYSTEM},
-    {"role": "user",   "content": "what is the total number of rules in the system"},
-    {"role": "assistant",
-     "content": "Calling list_rules to retrieve the active monitoring rules.",
-     "tool_calls": [tc("arl_v50_3a", "list_rules", {})]},
-    {"role": "tool", "tool_call_id": "arl_v50_3a", "content": PC_LIST_H},
-    {"role": "assistant", "content": _ARL_RULE_INSIGHT},
-]})
-
-# ARL_V50_4: "How many rules are there in the system" — exact session phrasing
-examples.append({"messages": [
-    {"role": "system", "content": THRESHOLD_SYSTEM},
-    {"role": "user",   "content": "How many rules are there in the system"},
-    {"role": "assistant",
-     "content": "Calling list_rules to retrieve the active monitoring rules.",
-     "tool_calls": [tc("arl_v50_4a", "list_rules", {})]},
-    {"role": "tool", "tool_call_id": "arl_v50_4a", "content": PC_LIST_H},
-    {"role": "assistant", "content": _ARL_RULE_INSIGHT},
-]})
 
 
 # ===========================================================================
@@ -615,6 +589,20 @@ def main():
                 if line:
                     v49_base.append(json.loads(line))
         print(f"[V50] Loaded {len(v49_base)} base examples from {V49_FULL_PATH.name}")
+
+        # Replace old threshold system prompts (pre-RULE INVENTORY) with the
+        # current live THRESHOLD_SYSTEM so training aligns with inference.
+        # Identifies old threshold examples by presence of "threshold_column"
+        # (unique to ThresholdAgent) AND absence of "RULE INVENTORY".
+        _updated_sys = 0
+        for ex in v49_base:
+            msgs = ex["messages"]
+            if msgs and msgs[0]["role"] == "system":
+                sc = msgs[0]["content"]
+                if "threshold_column" in sc and "RULE INVENTORY" not in sc:
+                    msgs[0]["content"] = THRESHOLD_SYSTEM
+                    _updated_sys += 1
+        print(f"[V50] Updated system prompt in {_updated_sys} V49 base threshold examples")
 
         filtered = v49_base
         for fn, label in [
