@@ -411,7 +411,7 @@ class OrchestratorAgent:
         print(f"[orchestrator] routing to: {labels}", flush=True)
         return labels
 
-    def run(self, query: str, tool_executor, last_assistant: str = "", history: list = None, last_cluster_result: str = "") -> tuple:
+    def run(self, query: str, tool_executor, last_assistant: str = "", history: list = None, last_cluster_result: str = "", last_rule_list: str = "") -> tuple:
         """
         Route query via LLM, run required agents (in parallel if >1), merge results.
         Returns: (combined_text, all_chart_results)
@@ -469,35 +469,14 @@ class OrchestratorAgent:
         if len(to_run) == 1:
             name, agent = to_run[0]
             context = ""
-            if name == "segmentation" and last_assistant:
-                q_lower = query.lower()
-                _followup_words = [
-                    "characterize", "characteristic", "describe", "explain", "tell me about",
-                    "what is cluster", "what makes cluster", "how would you describe",
-                    "how about", "what about", "and cluster", "about cluster",
-                    "compare cluster", "differ", "different about", "distinguish",
-                    "similar", "same", "high risk", "low risk", "risky", "profile",
-                    "analyze", "analysis", "drill", "look at", "above", "above result",
-                    "more detail", "more info", "expand on", "elaborate",
-                ]
-                _has_cluster_ref = re.search(r'\bcluster\s*\d+\b', q_lower)
-                # Also catch bare "how about cluster 4" where the number appears without "cluster N" prefix
-                _is_followup = _has_cluster_ref and any(w in q_lower for w in _followup_words)
-                # Also inject for attribute questions that don't name a specific cluster number
-                # e.g. "Which cluster has the highest age?", "What is the average income per cluster?"
-                _attribute_words = [
-                    "highest", "lowest", "oldest", "youngest", "most", "least",
-                    "average", "avg", "mean", "rank", "age", "income", "balance",
-                    "account age", "tenure", "what is the", "how does",
-                ]
-                _asking_about_attr = (
-                    ("which cluster" in q_lower or "what cluster" in q_lower or "which segment" in q_lower)
-                    or ("cluster" in q_lower and any(w in q_lower for w in _attribute_words))
-                )
+            if name == "threshold" and last_rule_list:
+                context = f"[PREVIOUS RULE LIST]\n{last_rule_list}\n[END RULE LIST]"
+                print("[orchestrator] injecting previous rule list for follow-up")
+            if name == "segmentation":
                 _cluster_ctx = last_cluster_result or last_assistant
-                if (_is_followup or _asking_about_attr) and "Cluster" in _cluster_ctx:
+                if _cluster_ctx and "Cluster" in _cluster_ctx:
                     context = f"[PREVIOUS CLUSTERING RESULT]\n{_cluster_ctx}\n[END PREVIOUS RESULT]"
-                    print("[orchestrator] injecting previous cluster context for follow-up")
+                    print("[orchestrator] injecting previous cluster context")
             return agent.run(query, tool_executor, context, history)
 
         results = {}

@@ -744,6 +744,7 @@ _cluster_cache       = _startup_cluster_cache  # pre-populated at startup; updat
 _thread_local        = threading.local()        # per-request: .current_query, .last_2d_state
 _last_cluster_result    = ""   # last clustering model response (for multi-turn follow-ups)
 _last_cluster_raw_stats = ""   # raw pre-computed stats block — more reliable for comparison queries
+_last_rule_list         = ""   # last list_rules result — injected on precision/FP ranking follow-ups
 
 def _json_safe(obj):
     """Recursively convert numpy types to JSON-serializable Python types."""
@@ -843,7 +844,10 @@ def tool_executor(tool_name, tool_input):
         if DF_RULE_SWEEP is None:
             return "Rule sweep data not found. Run python prepare_rule_sweep_data.py first.", None
         tbl_fig = make_figures.rule_list_figure(DF_RULE_SWEEP)
-        return lambda_rule_analysis.list_rules_text(DF_RULE_SWEEP), tbl_fig
+        result = lambda_rule_analysis.list_rules_text(DF_RULE_SWEEP)
+        global _last_rule_list
+        _last_rule_list = result
+        return result, tbl_fig
 
     elif tool_name == "rule_sar_backtest":
         if DF_RULE_SWEEP is None:
@@ -1443,6 +1447,7 @@ _about_panel = dbc.Collapse(
 )
 
 app.layout = dbc.Container([
+    dcc.Location(id="url", refresh=True),
     # Header
     dbc.Row([
         dbc.Col(
@@ -1641,6 +1646,8 @@ app.clientside_callback(
     function(n_clicks) {
         if (n_clicks && n_clicks > 0) {
             fetch('/stop', {method: 'POST'});
+            var ind = document.getElementById('chat-thinking-indicator');
+            if (ind) ind.style.display = 'none';
         }
         return 0;
     }
@@ -1696,8 +1703,6 @@ app.clientside_callback(
 def handle_chat(new_message, pending_prompt, messages):
     import threading as _thr
     from dash import set_props as _set_props
-    from agents.base_agent import stop_event
-    stop_event.clear()             # clear any lingering stop signal from New Chat
     ctx     = callback_context
     trigger = ctx.triggered[0]["prop_id"] if ctx.triggered else ""
     print(f"[handle_chat] enter thread={_thr.current_thread().ident} trigger={trigger} msgs={len(messages or [])}", flush=True)
@@ -1799,7 +1804,7 @@ def handle_chat(new_message, pending_prompt, messages):
     _agent_stop_event.clear()
 
     try:
-        global _last_cluster_result, _last_cluster_raw_stats
+        global _last_cluster_result, _last_cluster_raw_stats, _last_rule_list
         _thread_local.current_query = query
         _thread_local.last_2d_state = {}
         def _msg_text(m):
@@ -1838,7 +1843,9 @@ def handle_chat(new_message, pending_prompt, messages):
         else:
             # Prefer raw pre-computed stats over model prose for multi-turn cluster follow-ups
             _cluster_ctx = _last_cluster_raw_stats or _last_cluster_result
-            agent_text, chart_results = orchestrator.run(query, tool_executor, last_assistant, history, _cluster_ctx)
+            agent_text, chart_results = orchestrator.run(query, tool_executor, last_assistant, history, _cluster_ctx, _last_rule_list)
+            _last_rule_list = ""
+            _last_cluster_raw_stats = ""  # clear so subsequent follow-ups use _last_cluster_result (shorter)
         # Persist full clustering result for multi-turn cluster follow-ups.
         _seg_cluster_tools = {"ds_cluster_analysis", "cluster_analysis"}
         if any(r[0] in _seg_cluster_tools for r in chart_results):
@@ -2001,7 +2008,7 @@ def handle_chat(new_message, pending_prompt, messages):
                         parts = [f"{rf} ({fp:,} FP)" for rf, fp in top3.items()]
                         insight += "\n\nRules with the most false positives: " + ", ".join(parts) + "."
                 agent_text = insight
-        else:
+        elif not agent_text.startswith("Rule performance summary"):
             agent_text = f"Rule performance summary — detailed table shown below.\n\n{agent_text}"
 
     # If model returned empty/whitespace after a tool call, generate a
@@ -2058,7 +2065,7 @@ def handle_chat(new_message, pending_prompt, messages):
             ]
             q_l = (query or "").lower()
             target_attr = next((lbl for kws, lbl in _attr_map if any(kw in q_l for kw in kws)), None)
-            stats_text  = _last_cluster_raw_stats or ""
+            stats_text  = _cluster_cache.get("stats", "") or ""
             parsed = {}
             if target_attr and stats_text:
                 cur = None
@@ -2319,12 +2326,22 @@ def toggle_treemap_offcanvas(n, is_open):
     Output("scatter-offcanvas-graph", "figure"),
     Output("scatter-btn", "disabled"),
     Input("scatter-store", "data"),
+    Input("scatter-offcanvas", "is_open"),
+    State("scatter-store", "data"),
 )
-def refresh_scatter_offcanvas(scatter_data):
-    """Populate the scatter offcanvas and enable its button whenever clustering runs."""
-    if not scatter_data:
+def refresh_scatter_offcanvas(scatter_trigger, is_open, scatter_state):
+    """Set figure on new clustering data; re-push when offcanvas opens so
+    Firefox renders into a visible (non-zero-size) container."""
+    trigger = callback_context.triggered[0]["prop_id"] if callback_context.triggered else ""
+    if "is_open" in trigger:
+        # Offcanvas just opened — re-push existing figure so Firefox renders fresh
+        if is_open and scatter_state:
+            return scatter_state, False
+        return no_update, no_update
+    # scatter-store updated
+    if not scatter_trigger:
         return {}, True
-    return scatter_data, False
+    return scatter_trigger, False
 
 
 @callback(
@@ -2337,21 +2354,14 @@ def toggle_scatter_offcanvas(n, is_open):
     return not is_open
 
 
-# Firefox fix: call Plotly.Plots.resize() directly on the graph element after
-# the offcanvas animation completes.  window.dispatchEvent('resize') is ignored
-# by Firefox when the element was not visible at layout time.
+# Fallback resize after offcanvas animation completes (belt-and-suspenders).
 app.clientside_callback(
     """
     function(is_open) {
         if (is_open) {
             setTimeout(function() {
-                var el = document.getElementById('scatter-offcanvas-graph');
-                if (el && window.Plotly) {
-                    Plotly.Plots.resize(el);
-                } else {
-                    window.dispatchEvent(new Event('resize'));
-                }
-            }, 400);
+                window.dispatchEvent(new Event('resize'));
+            }, 500);
         }
         return window.dash_clientside.no_update;
     }
@@ -2643,20 +2653,14 @@ def show_network_graph(active_cell, table_data, is_open):
 
 # ── New Chat ──────────────────────────────────────────────────────────────────
 @callback(
-    Output("chat-component", "messages", allow_duplicate=True),
-    Output("cluster-result-store", "data", allow_duplicate=True),
-    Output("pending-prompt", "data", allow_duplicate=True),
-    Output("chat-thinking-indicator", "style", allow_duplicate=True),
+    Output("url", "href"),
     Input("new-chat-btn", "n_clicks"),
     prevent_initial_call=True,
 )
 def new_chat(_):
     from agents.base_agent import stop_event
-    global _last_cluster_result, _last_cluster_raw_stats
-    stop_event.set()               # signals in-flight generation to abort
-    _last_cluster_result    = ""
-    _last_cluster_raw_stats = ""
-    return [], "", None, {"display": "none"}
+    stop_event.set()   # cancel any in-flight generation before reload
+    return "/"
 
 
 # ── Save Chat ─────────────────────────────────────────────────────────────────

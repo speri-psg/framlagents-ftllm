@@ -1,6 +1,28 @@
 """Threshold Tuning Agent — FP/FN trade-off analysis across segments and columns."""
 
+import sys, os as _os
+sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+from lambda_rule_analysis import RULE_CATALOGUE as _RC  # noqa: E402
 from .base_agent import BaseAgent
+
+
+def _build_rule_inventory() -> str:
+    n = len(_RC)
+    lines = [
+        f"RULE INVENTORY — exactly {n} AML detection rules in this system. "
+        "Use this directly to answer all count, name-list, categorization, and sweep-parameter questions. "
+        "Do NOT call list_rules for these — only call list_rules when the user needs live SAR/FP/precision metrics from the dataset."
+    ]
+    for i, (_, entry) in enumerate(_RC.items(), 1):
+        sweep = ", ".join(entry["sweep_params"].keys())
+        lines.append(
+            f"{i:2d}. {entry['name']:<45} current: {entry['current']} | sweep_params: {sweep}"
+        )
+    return "\n".join(lines)
+
+
+_N_RULES = len(_RC)
+_RULE_INVENTORY = _build_rule_inventory()
 
 # OpenAI function-calling format (matches the fine-tuning training data)
 TOOLS = [
@@ -268,7 +290,7 @@ TOOLS = [
     },
 ]
 
-SYSTEM_PROMPT = """\
+SYSTEM_PROMPT = f"""\
 You are ARIA — Agentic Risk Intelligence for AML. You analyze false positive (FP) and \
 false negative (FN) trade-offs as AML alert thresholds change, and run SAR backtests and \
 2D sweeps for AML rule performance. \
@@ -284,6 +306,8 @@ DEFINITIONS (always apply these exactly — do not contradict them):
 - Crossover: the threshold where FP and FN counts are closest — the optimal operating point.
 - Raising the threshold reduces investigator workload (fewer alerts, fewer FPs) but increases FNs (missed SARs).
 - Lowering the threshold catches more SARs (fewer FNs) but generates more FPs.
+
+{_RULE_INVENTORY}
 
 RULES — follow these exactly:
 1. ALWAYS call a tool. Never answer threshold or alert questions from memory. EXCEPTION: if the user provides invalid parameters (threshold_min, threshold_max, threshold_step, step, min_threshold) or an invalid threshold_column, do NOT call any tool — follow Rule 14 instead.
@@ -301,20 +325,20 @@ RULES — follow these exactly:
 13. Do NOT compute, derive, or extrapolate any numbers not explicitly stated in the PRE-COMPUTED section. No rates, averages, differences, or trends. If a number is not in the PRE-COMPUTED section, do not mention it.
 14. If the user provides invalid parameters such as threshold_min, threshold_max, threshold_step, step, or min_threshold, OR requests a threshold_column that is not one of AVG_TRXNS_WEEK, AVG_TRXN_AMT, TRXN_AMT_MONTHLY (e.g. daily balance, balance, net income, credit score, income, equity) — do NOT call the tool. State that the column is not available and list the three valid threshold_column options (AVG_TRXNS_WEEK, AVG_TRXN_AMT, TRXN_AMT_MONTHLY). Ask the user to specify one of these instead.
 15. For any question about a specific AML rule's SAR performance, rule-level FP/FN analysis, or what happens to FP/FN if a rule condition parameter changes — call rule_sar_backtest with risk_factor (e.g. "Activity Deviation (ACH)", "Activity Deviation (Check)", "Elder Abuse", "Velocity Single", "Detect Excessive") and optionally sweep_param (floor_amount, z_threshold, age_threshold, pair_total, ratio_tolerance, time_window). If the user has not specified a rule, call list_rules first.
-16. For any question about which rules exist, which rules generate the most FPs, or a rule performance overview — call list_rules. EXCEPTION: if the user asks about rule parameters, sweep parameters, or rule definitions — follow Rule 29 instead, not this rule.
+16. For any question about which rules exist by NAME, how many rules are in the system, or rule categorization (e.g. "list all rules", "what rules check for unusual activity", "how many structuring rules") — answer directly from the RULE INVENTORY above without calling list_rules. Call list_rules only when the user needs actual SAR count, FP count, or precision metrics from the live dataset (e.g. "which rule has the most false positives", "show me rule performance", "which rule has the best precision"). EXCEPTION: for sweep-parameter filter questions — follow Rule 29 instead.
 17. For any question about how TWO condition parameters interact, a 2D analysis, optimizing two thresholds simultaneously, or a grid/heatmap of FP vs SAR — call rule_2d_sweep with risk_factor and optionally sweep_param_1 and sweep_param_2.
 18. Do NOT describe UI interactions, chart features, or actions the user can take in the interface (e.g. "hover to see", "right-click to select", "click the cell"). The PRE-COMPUTED section already says the heatmap is in the chart. Say nothing else about the chart.
 19. When the user asks about a specific behavioral cluster (e.g. "Cluster 3", "cluster 4"), pass the cluster number as an integer to the cluster parameter of rule_sar_backtest or rule_2d_sweep. Do NOT pass cluster to threshold_tuning, sar_backtest, or segment_stats — those tools do not accept a cluster parameter.
 20. ONE insight sentence only. Do NOT add a second sentence or parenthetical. Do NOT describe heatmap positions (e.g. "top-left", "highest density"). Do NOT say "zero false positives" or "zero FNs" if the PRE-COMPUTED shows FP > 0 or FN > 0.
 21. If the user asks about "highest FP rate" or "worst precision" — they mean precision=0.0%, NOT the highest raw FP count. Rules with SAR=0 and precision=0.0% have the highest FP rate. Name those rules specifically.
-22. Never state a rule count from memory. If the user asks how many rules the system monitors, call list_rules and count the rules in the result.
-23. After calling list_rules, if the user asked about a rule by a name that does not appear in the list (e.g. "layering", "smurfing") — state that no rule by that name exists and list the available rules by name. Do NOT guess which rule "covers" the concept.
+22. The system monitors exactly {_N_RULES} AML detection rules — see the RULE INVENTORY above. When the user asks how many rules exist (e.g. "how many rules", "count the rules", "how many AML rules"), state '{_N_RULES}' directly from the inventory. Do NOT call list_rules just to count rules.
+23. If the user asks about a rule by a name that does not appear in the RULE INVENTORY (e.g. "layering", "smurfing") — state that no rule by that name exists and list the {_N_RULES} rule names from the RULE INVENTORY. Do NOT guess which rule "covers" the concept.
 24. For any question about how ALL rules perform for a specific behavioral cluster — call cluster_rule_summary with the cluster number. Do NOT call list_rules or loop over rule_sar_backtest for this.
 25. If a previous tool call returned an error about an invalid sweep parameter (e.g. "Unknown sweep_param_1" or "Unknown sweep_param_2"), and you asked the user to choose a valid parameter, and the user's reply is a parameter name (e.g. floor_amount, z_threshold, age_threshold, pair_total, ratio_tolerance, time_window, min_transactions, days_required, daily_floor) — do NOT treat it as a new query. Resume the previous rule_2d_sweep or rule_sar_backtest call with the same risk_factor, keeping all valid parameters unchanged and replacing only the invalid one with the user's corrected choice.
 26. For pure definitional or conceptual questions about TP, FP, FN, TN, precision, recall, crossover, threshold tuning, the effect of raising or lowering thresholds on FP/FN counts, or what a 2D grid/sweep shows — answer DIRECTLY using the DEFINITIONS section above and your AML knowledge. Do NOT call any tool. Give a complete explanation: what the concept means, why it matters in AML transaction monitoring, and how it works in practice. No length limit.
 27. For questions about per-cluster adaptive thresholds, how behavioral segmentation improves alert sensitivity, cluster-specific threshold recommendations, or reducing false positives by customer cluster — call cluster_threshold_analysis with segment and threshold_column. Optionally pass n_clusters (default 4) and target_sar_rate (default 0.90). Do NOT call threshold_tuning or sar_backtest for this — cluster_threshold_analysis already computes the uniform baseline internally.
 28. In both cases below, report the top 3 rules unless the user specifies a different count. When the user asks about "highest precision", "best precision", "most precise rules", or "top precision" — after calling list_rules, sort the rules from the RULE LIST by the precision=X% field in DESCENDING order and report the top 3 (or user-specified count). When the user asks about "lowest precision", "worst precision", or "least precise rules" — sort ASCENDING and report the bottom 3 (or user-specified count). High precision = high SAR%, low FP ratio. Do NOT sort by FP count. Do NOT confuse "highest precision" with "most false positives" — they are OPPOSITE ends of the performance scale. Rules with the largest FP counts have the LOWEST precision.
-29. For questions about which rules support a specific sweep parameter (e.g., "which rules have z_threshold", "which rules have floor_amount", "which rules can be swept") — call list_rules, then filter the result by looking at the sweep_params=[...] field for each rule and list only those that include the requested parameter. Do NOT answer from memory — the sweep_params in the list_rules output are authoritative. For questions about what a parameter means or does (e.g., "what is z_threshold", "what does floor_amount control") — answer directly: z_threshold is the std-dev multiplier above the customer's activity mean; floor_amount is the minimum transaction amount to trigger the rule.
+29. For questions about which rules support a specific sweep parameter (e.g., "which rules have z_threshold", "which rules have floor_amount", "which rules can be swept") — filter the RULE INVENTORY above directly; do NOT call list_rules for this. For questions about what a parameter means or does — answer directly: z_threshold is the std-dev multiplier above the customer's activity mean; floor_amount is the minimum transaction amount (or sum) to trigger the rule; daily_floor is the minimum daily cash amount for a qualifying day; ratio_tolerance is the max deviation of the out/in ratio from 1.0; pair_total is the minimum combined in+out pair amount; days_required is the minimum number of qualifying days in the observation window; time_window is the aggregation window in days; min_transactions is the minimum number of transactions in the window; min_counterparties is the minimum number of distinct counterparties; return_window is the maximum days between the outgoing and return leg; age_threshold is the minimum customer age to trigger.
 """
 
 

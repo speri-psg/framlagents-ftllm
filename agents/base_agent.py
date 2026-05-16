@@ -428,8 +428,9 @@ class BaseAgent:
                 print(f"[{self.name}] DEBUG — end messages\n")
 
             else:
-                # No tool call found — final text response
-                return _strip_thinking(msg.content or ""), chart_results
+                # No tool call found — final text response.
+                final_text = msg.content or ""
+                return _strip_thinking(final_text), chart_results
 
         # Exceeded max iterations — return whatever text we have
         print(f"[{self.name}] WARNING: hit MAX_TOOL_ITERATIONS ({MAX_TOOL_ITERATIONS})")
