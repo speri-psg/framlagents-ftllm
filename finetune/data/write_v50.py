@@ -71,33 +71,57 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 sys.path.insert(0, str(DATA_DIR))
 
-from write_v41 import SEGMENTATION_SYSTEM  # noqa: E402
+from write_v41 import THRESHOLD_SYSTEM as _OLD_TS, SEGMENTATION_SYSTEM  # noqa: E402
+from lambda_rule_analysis import RULE_CATALOGUE as _RC                  # noqa: E402
 
-# Import live SYSTEM_PROMPT from agents.threshold_agent without triggering the full
-# agents package chain (agents/__init__.py imports OrchestratorAgent which pulls in
-# openai and all sub-agents). We stub out agents.base_agent so the relative import
-# inside threshold_agent.py resolves without errors.
-import importlib.util as _ilu, types as _typ
-_sa  = _typ.ModuleType("agents")
-_sb  = _typ.ModuleType("agents.base_agent")
-class _DummyBase: pass
-_sb.BaseAgent = _DummyBase
-import sys as _sys2
-_sys2.modules.setdefault("agents",            _sa)
-_sys2.modules.setdefault("agents.base_agent", _sb)
-_spec = _ilu.spec_from_file_location(
-    "agents.threshold_agent",
-    DATA_DIR.parent.parent / "agents" / "threshold_agent.py",
+# Build a condensed training THRESHOLD_SYSTEM: inject RULE INVENTORY into the short
+# write_v40 base (~5,000 chars / ~1,250 tokens) and patch Rules 16/22/23 + append
+# 27-29.  Target ~8,000 chars / ~2,000 tokens — leaves ~2,096 tokens for conversation
+# at the model's 4,096-token hard limit.  The full live inference SYSTEM_PROMPT
+# (~14,000 chars / ~3,500 tokens) cannot be used for training — it leaves only ~596
+# tokens for conversation content, truncating most examples to near-zero signal.
+
+def _build_training_inventory() -> str:
+    n = len(_RC)
+    lines = [
+        f"\nRULE INVENTORY — exactly {n} AML detection rules. "
+        "Use this for count, name-list, categorization, and sweep-parameter queries. "
+        "Call list_rules only when the user needs live SAR/FP/precision metrics.\n"
+    ]
+    for i, (_, entry) in enumerate(_RC.items(), 1):
+        sweep = ", ".join(entry["sweep_params"].keys())
+        lines.append(f"{i:2d}. {entry['name']:<45} current: {entry['current']} | sweep: {sweep}")
+    return "\n".join(lines) + "\n\n"
+
+_TRAIN_N         = len(_RC)
+_TRAIN_INVENTORY = _build_training_inventory()
+
+_INJECT = "RULES — follow these exactly:"
+_base_ts, _rules_ts = _OLD_TS.split(_INJECT, 1)
+THRESHOLD_SYSTEM = (
+    _base_ts
+    + _TRAIN_INVENTORY
+    + _INJECT
+    + _rules_ts
+    .replace(
+        '16. For any question about which rules exist, which rules generate the most FPs, or a rule performance overview — call list_rules.',
+        '16. For any question listing, categorizing, or counting a SUBSET of rules (e.g. "list all AML rules", "what rules check for unusual activity", "how many structuring rules") — call list_rules to retrieve live SAR/FP data. Use the RULE INVENTORY above for pure name-only lookups. Total COUNT queries ("how many rules") → Rule 22. Sweep-param filters → Rule 29.',
+    )
+    .replace(
+        '22. The system contains exactly 16 AML rules. Never state a different count.',
+        f'22. The system monitors exactly {_TRAIN_N} AML detection rules — see RULE INVENTORY above. When the user asks how many rules exist, state "{_TRAIN_N}" directly. Do NOT call list_rules just to count rules.',
+    )
+    .replace(
+        '23. After calling list_rules, if the user asked about a rule by a name that does not appear in the list (e.g. "layering", "smurfing") — state that no rule by that name exists and list the 11 available rules. Do NOT guess which rule "covers" the concept.',
+        f'23. If the user asks about a rule by a name not in the RULE INVENTORY above — state that no rule by that name exists and list the {_TRAIN_N} rule names from the RULE INVENTORY. Do NOT guess which rule "covers" the concept.',
+    )
+    + "\n27. For per-cluster adaptive thresholds or cluster-specific threshold recommendations — call cluster_threshold_analysis with segment and threshold_column.\n"
+    + "28. When asked for \"highest precision\" or \"top precision\" rules — sort by precision% DESCENDING after calling list_rules. For \"lowest precision\" — sort ASCENDING. Do NOT sort by FP count.\n"
+    + f"29. For questions about which rules support a specific sweep parameter (e.g. \"which rules have z_threshold\") — filter the RULE INVENTORY above directly; do NOT call list_rules for this.\n"
 )
-_ta = _ilu.module_from_spec(_spec)
-_ta.__package__ = "agents"
-_spec.loader.exec_module(_ta)
-THRESHOLD_SYSTEM = _ta.SYSTEM_PROMPT
-print(f"[V50] Loaded live THRESHOLD_SYSTEM ({len(THRESHOLD_SYSTEM)} chars, has RULE INVENTORY: {'RULE INVENTORY' in THRESHOLD_SYSTEM})")
-# Remove stub modules so subsequent imports (write_v42 → agents.orchestrator) work correctly
-for _k in ["agents", "agents.base_agent", "agents.threshold_agent"]:
-    _sys2.modules.pop(_k, None)
-del _ilu, _typ, _sa, _sb, _DummyBase, _sys2, _spec, _ta, _k
+print(f"[V50] Training THRESHOLD_SYSTEM: {len(THRESHOLD_SYSTEM)} chars "
+      f"(~{len(THRESHOLD_SYSTEM)//4} tokens, RULE INVENTORY present: {'RULE INVENTORY' in THRESHOLD_SYSTEM})")
+del _base_ts, _rules_ts, _INJECT
 from write_v42 import tc, prev_context          # noqa: E402
 from write_v44 import _RS_STRUCTURING_IN        # noqa: E402
 from write_v45 import PC_LIST_H, PC_CRS_CLUSTER4, _CRS_CLUSTER4  # noqa: E402
