@@ -1838,18 +1838,22 @@ def handle_chat(new_message, pending_prompt, messages):
         ]
         # If the user uploaded a document alongside a question, force policy agent
         # so the question is answered from the KB regardless of query keywords.
+        _raw_stats_this_turn = ""
         if ingest_confirmation:
             agent_text, chart_results = orchestrator.policy_agent.run(query, tool_executor)
         else:
             # Prefer raw pre-computed stats over model prose for multi-turn cluster follow-ups
             _cluster_ctx = _last_cluster_raw_stats or _last_cluster_result
             agent_text, chart_results = orchestrator.run(query, tool_executor, last_assistant, history, _cluster_ctx, _last_rule_list)
+            _raw_stats_this_turn = _last_cluster_raw_stats  # capture before clearing
             _last_rule_list = ""
-            _last_cluster_raw_stats = ""  # clear so subsequent follow-ups use _last_cluster_result (shorter)
-        # Persist full clustering result for multi-turn cluster follow-ups.
+            _last_cluster_raw_stats = ""
+        # Persist clustering context for multi-turn follow-ups.
+        # Always use raw tool stats (complete, model-agnostic) rather than model text,
+        # which may be insight-only and lack the full per-cluster numbers.
         _seg_cluster_tools = {"ds_cluster_analysis", "cluster_analysis"}
         if any(r[0] in _seg_cluster_tools for r in chart_results):
-            _last_cluster_result = agent_text or ""
+            _last_cluster_result = _raw_stats_this_turn or agent_text or ""
         print(f"[app] raw agent_text ({len(agent_text or '')} chars): {repr((agent_text or '')[:300])}", flush=True)
     except Exception as e:
         import traceback
