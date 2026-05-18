@@ -154,7 +154,7 @@ def cluster_threshold_analysis(df_ss, df_sar, segment, threshold_column,
     # ── Pre-computed text ─────────────────────────────────────────────────────
     target_pct = int(target_sar_rate * 100)
     lines = [
-        "=== PRE-COMPUTED CLUSTER THRESHOLD ANALYSIS (copy verbatim, do not alter numbers) ===",
+        "=== CLUSTER THRESHOLD ANALYSIS ===",
         f"Segment: **{segment}** | Column: {threshold_column} ({_COL_LABEL[threshold_column]}) "
         f"| Clusters: {n_clusters} | Target SAR catch: ≥{target_pct}%",
         "",
@@ -203,11 +203,32 @@ def cluster_threshold_analysis(df_ss, df_sar, segment, threshold_column,
     uni_fps   = [r["base_fp"] for r in cluster_results]
     adapt_fps = [r["rec"]["fp"] if r["rec"] else r["base_fp"] for r in cluster_results]
 
+    uni_hover = [
+        (f"Cluster {r['rank']}: {r['label']}<br>"
+         f"Customers: {r['n']:,} | SARs: {r['n_sar']:,}<br>"
+         f"Uniform threshold: {_fmt(uni_t, threshold_column)}<br>"
+         f"FP={r['base_fp']:,}, TP={r['base_tp']:,}, "
+         f"TP rate={r['base_tp']/r['n_sar']*100:.1f}%")
+        for r in cluster_results
+    ]
+    adapt_hover = [
+        (f"Cluster {r['rank']}: {r['label']}<br>"
+         f"Recommended threshold: {_fmt(r['rec']['threshold'], threshold_column)}<br>"
+         f"FP={r['rec']['fp']:,}, TP={r['rec']['tp']:,}, "
+         f"TP rate={r['rec']['tp_rate']*100:.1f}%, precision={r['rec']['precision']*100:.1f}%<br>"
+         f"Change vs uniform: {r['rec']['fp']-r['base_fp']:+,} FP, "
+         f"{r['rec']['tp']-r['base_tp']:+,} SAR")
+        if r["rec"] else f"Cluster {r['rank']}: no SAR data"
+        for r in cluster_results
+    ]
+
     fig = go.Figure(data=[
         go.Bar(name=f"Uniform {_fmt(uni_t, threshold_column)}",
-               x=c_names, y=uni_fps, marker_color="#EF553B"),
+               x=c_names, y=uni_fps, marker_color="#EF553B",
+               hovertext=uni_hover, hoverinfo="text"),
         go.Bar(name="Cluster-Adaptive", x=c_names, y=adapt_fps,
-               marker_color="#636EFA"),
+               marker_color="#636EFA",
+               hovertext=adapt_hover, hoverinfo="text"),
     ])
     fig.update_layout(
         barmode="group",

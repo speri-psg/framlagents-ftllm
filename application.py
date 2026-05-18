@@ -586,7 +586,7 @@ def compute_threshold_stats(df_seg, threshold):
                if fp <= max_fp * 0.20 and fn <= max_fn * 0.20]
 
     # ── Build pre-written factual interpretation ──────────────────────────────
-    lines = ["=== PRE-COMPUTED ANALYSIS (copy this verbatim, do not alter numbers) ==="]
+    lines = ["=== THRESHOLD ANALYSIS ==="]
 
     lines.append(f"### Threshold Tuning — False Positive / False Negative Trade-off\n")
 
@@ -621,7 +621,7 @@ def compute_threshold_stats(df_seg, threshold):
         lines.append("**Optimal Zone**: no single threshold achieves both FP and FN below 20% of their maximums simultaneously.")
 
     lines.append("\n*(Detailed sweep chart shown below.)*")
-    lines.append("=== END PRE-COMPUTED ANALYSIS ===")
+    lines.append("=== END THRESHOLD ANALYSIS ===")
 
     return "\n".join(lines)
 
@@ -629,7 +629,7 @@ def compute_threshold_stats(df_seg, threshold):
 def compute_segment_stats(df):
     total_alerts = int(df["alerts"].sum())
     total_accounts = len(df)
-    lines = ["=== PRE-COMPUTED SEGMENT STATS (copy verbatim, do not compute new numbers) ==="]
+    lines = ["=== SEGMENT STATS ==="]
     lines.append("### Segment Overview\n")
     for seg_id, name in [(0, "Business"), (1, "Individual")]:
         seg = df[df["dynamic_segment"] == seg_id]
@@ -649,7 +649,7 @@ def compute_segment_stats(df):
         lines.append(f"- False Positives: **{fp:,}** (FP rate={fp_rate}% of alerts)")
         lines.append(f"- False Negatives: **{fn:,}**")
         lines.append("")
-    lines.append("=== END PRE-COMPUTED SEGMENT STATS ===")
+    lines.append("=== END SEGMENT STATS ===")
     return "\n".join(lines)
 
 
@@ -693,7 +693,7 @@ def compute_sar_backtest(df_sar_seg, sar_col, segment_name):
     # Threshold where SARs first start being missed
     first_miss = next(((t, c, m) for t, c, m in sweep if m > 0), None)
 
-    lines = ["=== PRE-COMPUTED SAR BACKTEST (copy this verbatim, do not alter numbers) ==="]
+    lines = ["=== SAR BACKTEST ==="]
 
     lines.append(f"### SAR Backtest — {segment_name} / {sar_col}\n")
     lines.append(f"**Population:** {total_alerted:,} alerted customers | **SARs:** {total_sars:,} ({round(100*total_sars/total_alerted,1)}% SAR filing rate)\n")
@@ -718,9 +718,42 @@ def compute_sar_backtest(df_sar_seg, sar_col, segment_name):
 
     lines.append(f"- At highest threshold ({sweep[-1][0]}): **{sweep[-1][1]} caught**, {sweep[-1][2]} missed")
     lines.append("\n*(Detailed sweep chart shown below.)*")
-    lines.append("=== END PRE-COMPUTED SAR BACKTEST ===")
+    lines.append("=== END SAR BACKTEST ===")
 
     return "\n".join(lines)
+
+
+# ── Alert/SAR/FP enrichment for stats text ────────────────────────────────────
+def _append_alert_stats(stats_text, df_clustered):
+    """
+    Append per-cluster Alerts/SARs/FPs to the clustering stats text using the
+    same customer-level join logic as smartseg_tree_dynamic. The enriched text
+    is stored in _last_cluster_raw_stats so the model can answer SAR count
+    questions directly from [PREVIOUS CLUSTERING RESULT] without calling tools.
+    """
+    if DF_RULE_SWEEP is None or "customer_id" not in df_clustered.columns:
+        return stats_text
+    try:
+        sar_map     = DF_RULE_SWEEP.groupby("customer_id")["is_sar"].max()
+        alerted_ids = set(DF_RULE_SWEEP["customer_id"].unique())
+        dc = df_clustered[["customer_id", "cluster"]].copy()
+        dc["is_sar"]     = dc["customer_id"].map(sar_map).fillna(0).astype(int)
+        dc["is_alerted"] = dc["customer_id"].isin(alerted_ids).astype(int)
+        dc["is_fp"]      = ((dc["is_alerted"] == 1) & (dc["is_sar"] == 0)).astype(int)
+        lines = ["\nAlert/SAR/FP counts per cluster (customer-level, matches treemap):"]
+        for lbl in sorted(dc["cluster"].unique()):
+            grp = dc[dc["cluster"] == lbl]
+            display = int(lbl) + 1  # 0-based KMeans → 1-based display
+            lines.append(
+                f"Cluster {display}: "
+                f"Alerts: {int(grp['is_alerted'].sum()):,} | "
+                f"SARs: {int(grp['is_sar'].sum()):,} | "
+                f"FPs: {int(grp['is_fp'].sum()):,}"
+            )
+        return stats_text + "\n" + "\n".join(lines)
+    except Exception as _e:
+        print(f"[alert stats] enrichment failed (non-fatal): {_e}")
+        return stats_text
 
 
 # ── Cluster filter helper ─────────────────────────────────────────────────────
@@ -763,7 +796,7 @@ def _json_safe(obj):
 
 def tool_executor(tool_name, tool_input):
     """Execute a tool called by an agent. Returns (result_text, fig_or_None)."""
-    global DF_SS, _cluster_cache
+    global DF_SS, _cluster_cache, DF_CLUSTER_LABELS
 
     if tool_name == "threshold_tuning":
         segment = tool_input.get("segment", "Business")
@@ -893,7 +926,12 @@ def tool_executor(tool_name, tool_input):
             "customer_type": customer_type,
         })
         global _last_cluster_raw_stats
+        stats = _append_alert_stats(stats, df_clustered)
         _last_cluster_raw_stats = stats
+        _cl = df_clustered[["customer_id", "cluster"]].copy()
+        if len(_cl) > 0 and _cl["cluster"].min() == 0:
+            _cl["cluster"] = _cl["cluster"] + 1
+        DF_CLUSTER_LABELS = _cl
         treemap_fig = lambda_ds_performance.smartseg_tree_dynamic(
             df_clustered, customer_type, dims=_DS_DIMS, df_rule_sweep=DF_RULE_SWEEP
         )
@@ -985,7 +1023,12 @@ def tool_executor(tool_name, tool_input):
                 )
                 stats_table = make_figures.cluster_stats_table(df_clustered, customer_type)
                 figs = (stats_table, scatter_fig, treemap_fig) if stats_table is not None else (scatter_fig, treemap_fig)
+                stats = _append_alert_stats(stats, df_clustered)
                 _last_cluster_raw_stats = stats
+                _cl = df_clustered[["customer_id", "cluster"]].copy()
+                if len(_cl) > 0 and _cl["cluster"].min() == 0:
+                    _cl["cluster"] = _cl["cluster"] + 1
+                DF_CLUSTER_LABELS = _cl
                 return stats, figs
 
             # Cache miss or non-default n_clusters: run full clustering
@@ -1004,7 +1047,12 @@ def tool_executor(tool_name, tool_input):
             )
             stats_table  = make_figures.cluster_stats_table(df_clustered, customer_type)
             figs = (stats_table, scatter_fig, treemap_fig) if stats_table is not None else (scatter_fig, treemap_fig)
+            stats = _append_alert_stats(stats, df_clustered)
             _last_cluster_raw_stats = stats
+            _cl = df_clustered[["customer_id", "cluster"]].copy()
+            if len(_cl) > 0 and _cl["cluster"].min() == 0:
+                _cl["cluster"] = _cl["cluster"] + 1
+            DF_CLUSTER_LABELS = _cl
             return stats, figs
 
     elif tool_name == "ofac_screening":
@@ -1910,9 +1958,9 @@ def handle_chat(new_message, pending_prompt, messages):
     agent_text = re.sub(r'^Tool result for [^:\n]+:\n?', '', agent_text, flags=re.MULTILINE).strip()  # model copies tool-msg prefix
     agent_text = re.sub(r'^The PRE-COMPUTED[^\n]*\n?', '', agent_text).strip()  # leaked instruction header
     agent_text = re.sub(r'\s*DISPLAY_CLUSTERS:[\d,\s]*', '', agent_text).strip()
-    agent_text = re.sub(r'===.*?PRE-COMPUTED ANALYSIS.*?===.*?===\s*END PRE-COMPUTED ANALYSIS\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
-    agent_text = re.sub(r'PRE-COMPUTED ANALYSIS[:\s]*\n?', '', agent_text).strip()
-    agent_text = re.sub(r'===.*?PRE-COMPUTED SEGMENT STATS.*?===.*?===\s*END PRE-COMPUTED SEGMENT STATS\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
+    agent_text = re.sub(r'===.*?(?:PRE-COMPUTED ANALYSIS|THRESHOLD ANALYSIS).*?===.*?===\s*END (?:PRE-COMPUTED ANALYSIS|THRESHOLD ANALYSIS)\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
+    agent_text = re.sub(r'(?:PRE-COMPUTED ANALYSIS|THRESHOLD ANALYSIS)[:\s]*\n?', '', agent_text).strip()
+    agent_text = re.sub(r'===.*?(?:PRE-COMPUTED SEGMENT STATS|SEGMENT STATS).*?===.*?===\s*END (?:PRE-COMPUTED SEGMENT STATS|SEGMENT STATS)\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED CLUSTER STATS.*?===.*?===\s*END PRE-COMPUTED CLUSTER STATS\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED CLUSTER RULE SUMMARY.*?===.*?===\s*END CLUSTER RULE SUMMARY\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED CLUSTER THRESHOLD ANALYSIS[^\n]*===\n?', '', agent_text).strip()
@@ -1933,16 +1981,16 @@ def handle_chat(new_message, pending_prompt, messages):
     agent_text = re.sub(r'\$\\gt\$',  '>',  agent_text)
     agent_text = re.sub(r'\$\\lt\$',  '<',  agent_text)
     # Strip PRE-COMPUTED blocks — with === markers (primary) then without (fallback)
-    agent_text = re.sub(r'===.*?PRE-COMPUTED SAR BACKTEST.*?===.*?===\s*END PRE-COMPUTED SAR BACKTEST\s*===\n?', '', agent_text, flags=re.DOTALL).strip()
-    agent_text = re.sub(r'PRE-COMPUTED SAR BACKTEST.*?(?:===\s*END PRE-COMPUTED SAR BACKTEST\s*===\s*|END PRE-COMPUTED SAR BACKTEST\s*===\s*)', '', agent_text, flags=re.DOTALL).strip()
+    agent_text = re.sub(r'===.*?(?:PRE-COMPUTED SAR BACKTEST|SAR BACKTEST).*?===.*?===\s*END (?:PRE-COMPUTED SAR BACKTEST|SAR BACKTEST)\s*===\n?', '', agent_text, flags=re.DOTALL).strip()
+    agent_text = re.sub(r'(?:PRE-COMPUTED SAR BACKTEST|SAR BACKTEST).*?(?:===\s*END (?:PRE-COMPUTED SAR BACKTEST|SAR BACKTEST)\s*===\s*)', '', agent_text, flags=re.DOTALL).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED RULE SWEEP.*?===.*?===\s*END RULE SWEEP\s*===\n?', '', agent_text, flags=re.DOTALL).strip()
     agent_text = re.sub(r'PRE-COMPUTED RULE SWEEP.*?(?:===\s*END RULE SWEEP\s*===\s*|END RULE SWEEP\s*===\s*)', '', agent_text, flags=re.DOTALL).strip()
     agent_text = re.sub(r'(?:===\s*)?END RULE SWEEP\s*===\s*', '', agent_text).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED RULE LIST.*?===.*?===\s*END RULE LIST\s*===\n?', '', agent_text, flags=re.DOTALL).strip()
     agent_text = re.sub(r'Available AML rules with SAR/FP performance.*?END RULE LIST\s*===\s*', '', agent_text, flags=re.DOTALL).strip()
     agent_text = re.sub(r'(?:===\s*)?END RULE LIST\s*===\s*', '', agent_text).strip()
-    agent_text = re.sub(r'===.*?PRE-COMPUTED SEGMENT STATS.*?===.*?===\s*END PRE-COMPUTED SEGMENT STATS\s*===\n?', '', agent_text, flags=re.DOTALL).strip()
-    agent_text = re.sub(r'PRE-COMPUTED SEGMENT STATS.*?(?:===\s*END PRE-COMPUTED SEGMENT STATS\s*===\s*|END PRE-COMPUTED SEGMENT STATS\s*===\s*)', '', agent_text, flags=re.DOTALL).strip()
+    agent_text = re.sub(r'===.*?(?:PRE-COMPUTED SEGMENT STATS|SEGMENT STATS).*?===.*?===\s*END (?:PRE-COMPUTED SEGMENT STATS|SEGMENT STATS)\s*===\n?', '', agent_text, flags=re.DOTALL).strip()
+    agent_text = re.sub(r'(?:PRE-COMPUTED SEGMENT STATS|SEGMENT STATS).*?(?:===\s*END (?:PRE-COMPUTED SEGMENT STATS|SEGMENT STATS)\s*===\s*)', '', agent_text, flags=re.DOTALL).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED 2D SWEEP.*?===.*?===\s*END 2D SWEEP\s*===\n?', '', agent_text, flags=re.DOTALL).strip()
     agent_text = re.sub(r'PRE-COMPUTED 2D SWEEP.*?(?:===\s*END 2D SWEEP\s*===\s*|END 2D SWEEP\s*===\s*)', '', agent_text, flags=re.DOTALL).strip()
     agent_text = re.sub(r'2D SWEEP[^\n]*Copy this verbatim[^\n]*\n?', '', agent_text, flags=re.IGNORECASE).strip()
