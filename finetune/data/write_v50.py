@@ -614,20 +614,6 @@ def main():
                     v49_base.append(json.loads(line))
         print(f"[V50] Loaded {len(v49_base)} base examples from {V49_FULL_PATH.name}")
 
-        # Replace old threshold system prompts (pre-RULE INVENTORY) with the
-        # current live THRESHOLD_SYSTEM so training aligns with inference.
-        # Identifies old threshold examples by presence of "threshold_column"
-        # (unique to ThresholdAgent) AND absence of "RULE INVENTORY".
-        _updated_sys = 0
-        for ex in v49_base:
-            msgs = ex["messages"]
-            if msgs and msgs[0]["role"] == "system":
-                sc = msgs[0]["content"]
-                if "threshold_column" in sc and "RULE INVENTORY" not in sc:
-                    msgs[0]["content"] = THRESHOLD_SYSTEM
-                    _updated_sys += 1
-        print(f"[V50] Updated system prompt in {_updated_sys} V49 base threshold examples")
-
         filtered = v49_base
         for fn, label in [
             (_has_stale_rule_list,
