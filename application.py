@@ -359,8 +359,6 @@ def build_network_graph(customer_id):
             plot_bgcolor="#111",
             paper_bgcolor="#1a1a1a",
             font=dict(color="#eee"),
-            height=650,
-            width=1100,
         ),
     )
 
@@ -406,8 +404,6 @@ def build_network_graph(customer_id):
             font=dict(color="#eee", size=10),
             xaxis=dict(tickangle=-30),
             yaxis=dict(gridcolor="#333"),
-            height=350,
-            width=1100,
         )
 
     return fig, feat_fig
@@ -1625,21 +1621,25 @@ app.layout = dbc.Container([
             dcc.Graph(
                 id="network-graph-figure",
                 config={
+                    "responsive": True,
                     "toImageButtonOptions": {
-                        "format": "png", "filename": "network_graph", "scale": 2,
+                        "format": "png", "filename": "network_graph",
+                        "height": 700, "width": 1200, "scale": 2,
                     },
                 },
-                style={"height": "380px", "width": "100%"},
+                style={"height": "380px"},
             ),
             html.Hr(),
             dcc.Graph(
                 id="network-feature-bar",
                 config={
+                    "responsive": True,
                     "toImageButtonOptions": {
-                        "format": "png", "filename": "network_features", "scale": 2,
+                        "format": "png", "filename": "network_features",
+                        "height": 400, "width": 1000, "scale": 2,
                     },
                 },
-                style={"height": "260px", "width": "100%"},
+                style={"height": "260px"},
             ),
         ],
     ),
