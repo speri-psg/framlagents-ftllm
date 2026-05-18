@@ -1620,13 +1620,25 @@ app.layout = dbc.Container([
             html.Div(id="network-graph-customer-badge", className="mb-2"),
             dcc.Graph(
                 id="network-graph-figure",
-                config={"responsive": True},
+                config={
+                    "responsive": True,
+                    "toImageButtonOptions": {
+                        "format": "png", "filename": "network_graph",
+                        "height": 700, "width": 1200, "scale": 2,
+                    },
+                },
                 style={"height": "380px"},
             ),
             html.Hr(),
             dcc.Graph(
                 id="network-feature-bar",
-                config={"responsive": True},
+                config={
+                    "responsive": True,
+                    "toImageButtonOptions": {
+                        "format": "png", "filename": "network_features",
+                        "height": 400, "width": 1000, "scale": 2,
+                    },
+                },
                 style={"height": "260px"},
             ),
         ],
