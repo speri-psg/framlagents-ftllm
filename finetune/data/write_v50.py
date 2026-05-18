@@ -104,6 +104,10 @@ THRESHOLD_SYSTEM = (
     + _INJECT
     + _rules_ts
     .replace(
+        '9. After receiving tool results, the tool result contains a PRE-COMPUTED section. You MUST copy that section word-for-word into your response. Do NOT change any numbers, thresholds, or directional statements. After copying it, add ONE sentence of AML domain insight.',
+        '9. After receiving tool results: (a) First output ONE ### header line naming the analysis. (b) Then write ONE sentence of AML domain insight derived from the tool result. Do NOT copy or re-echo the PRE-COMPUTED section — the chart panel renders it automatically. Do NOT include tables, bullet lists, or numerical summaries in your response.',
+    )
+    .replace(
         '16. For any question about which rules exist, which rules generate the most FPs, or a rule performance overview — call list_rules.',
         '16. For any question listing, categorizing, or counting a SUBSET of rules (e.g. "list all AML rules", "what rules check for unusual activity", "how many structuring rules") — call list_rules to retrieve live SAR/FP data. Use the RULE INVENTORY above for pure name-only lookups. Total COUNT queries ("how many rules") → Rule 22. Sweep-param filters → Rule 29.',
     )
@@ -122,6 +126,13 @@ THRESHOLD_SYSTEM = (
 print(f"[V50] Training THRESHOLD_SYSTEM: {len(THRESHOLD_SYSTEM)} chars "
       f"(~{len(THRESHOLD_SYSTEM)//4} tokens, RULE INVENTORY present: {'RULE INVENTORY' in THRESHOLD_SYSTEM})")
 del _base_ts, _rules_ts, _INJECT
+
+SEGMENTATION_SYSTEM = SEGMENTATION_SYSTEM.replace(
+    '9. After receiving tool results, copy the cluster stats verbatim, then add ONE sentence describing the highest-risk cluster based solely on the numbers in the tool result. Do NOT suggest thresholds, dollar cutoffs, or monitoring actions.',
+    '9. After receiving tool results, output ONE sentence describing the highest-risk cluster based solely on the numbers in the tool result. Do NOT copy or re-echo cluster stats — the chart panel renders them automatically. Do NOT suggest thresholds, dollar cutoffs, or monitoring actions.',
+)
+print(f"[V50] Training SEGMENTATION_SYSTEM: Rule 9 patched: {'copy the cluster stats verbatim' not in SEGMENTATION_SYSTEM}")
+
 from write_v42 import tc, prev_context          # noqa: E402
 from write_v44 import _RS_STRUCTURING_IN        # noqa: E402
 from write_v45 import PC_LIST_H, PC_CRS_CLUSTER4, _CRS_CLUSTER4  # noqa: E402
@@ -296,6 +307,12 @@ examples.append({"messages": [
 # No tool call on the follow-up turn — answer directly from prior context.
 # ===========================================================================
 
+_AT_V50_1_RESPONSE = (
+    "### Cluster-Adaptive Threshold Analysis — Business | Avg Weekly Transactions\n\n"
+    "Cluster-adaptive thresholds reduce total false positives by 29 while retaining 93.1% SAR coverage "
+    "— Cluster 1 (High Volume) benefits most, cutting 6 FPs without missing any SARs."
+)
+
 examples.append({"messages": [
     {"role": "system", "content": THRESHOLD_SYSTEM},
     {"role": "user",   "content": "Run cluster-adaptive threshold analysis for Business customers"},
@@ -304,7 +321,7 @@ examples.append({"messages": [
      "tool_calls": [tc("at_v50_1a", "cluster_threshold_analysis",
                        {"segment": "Business", "threshold_column": "AVG_TRXNS_WEEK"})]},
     {"role": "tool", "tool_call_id": "at_v50_1a", "content": _PC_AT_A},
-    {"role": "assistant", "content": _AT_A_RESPONSE},
+    {"role": "assistant", "content": _AT_V50_1_RESPONSE},
     {"role": "user",   "content": "which cluster reduces the most false positives with tuning?"},
     {"role": "assistant",
      "content": (
@@ -331,7 +348,6 @@ examples.append({"messages": [
 
 _RS_VELOCITY_RATIO_RESPONSE = (
     "### SAR Backtest — Velocity Single | ratio_tolerance\n\n"
-    + _RS_VELOCITY_RATIO_BODY + "\n\n"
     "The current ratio_tolerance of 0.10 catches all 49 SARs — tightening to 0.09 "
     "retains 95.9% SAR coverage (47 of 49) while reducing FPs by 11 (201 → 190). "
     "Unlike pair_total, ratio_tolerance provides meaningful discriminatory power: "
@@ -365,8 +381,7 @@ examples.append({"messages": [
 # ===========================================================================
 
 _CRS_CLUSTER4_RESPONSE = (
-    "=== PRE-COMPUTED CLUSTER RULE SUMMARY (copy this verbatim) ===\n"
-    + _CRS_CLUSTER4 + "\n\n"
+    "### Rule Performance — Cluster 4\n\n"
     "In Cluster 4, **Round-trip** shows the highest precision (42.9%) — nearly "
     "1 in 2 alerts is a genuine SAR. **Funnel Account** (31.0%) and **Velocity Multiple** "
     "(29.5%) also perform well above the cluster average. **Activity Deviation (ACH)** "
@@ -502,7 +517,7 @@ examples.append({"messages": [
      "tool_calls": [tc("seg_v50_1a", "ds_cluster_analysis",
                        {"customer_type": "Business", "n_clusters": 4})]},
     {"role": "tool", "tool_call_id": "seg_v50_1a", "content": "Tool result for ds_cluster_analysis:\n" + _CLUSTER_BIZ_TIED},
-    {"role": "assistant", "content": "### Business Customer Segmentation by Transaction Behavior\n" + _CLUSTER_BIZ_TIED + "\n\nCluster 3 has the highest Avg Weekly Txn Amount at $3,126, indicating the highest potential exposure risk among the four segments."},
+    {"role": "assistant", "content": "### Business Customer Segmentation by Transaction Behavior\n\nCluster 3 has the highest Avg Weekly Txn Amount at $3,126, indicating the highest potential exposure risk among the four segments."},
     {"role": "user",   "content": prev_context(_CLUSTER_BIZ_TIED) + "\nwhich one is the most active cluster"},
     {"role": "assistant", "content": _SEG_MOST_ACTIVE_RESPONSE},
 ]})
@@ -527,13 +542,11 @@ _PC_STRUCTURING_IN = "Tool result for rule_sar_backtest:\n" + _RS_STRUCTURING_IN
 
 _ARS_STRUCTURING_PLURAL_RESPONSE = (
     "### SAR Backtest — Structuring (Incoming Cash) | daily_floor\n\n"
-    + _RS_STRUCTURING_IN + "\n\n"
     "The system monitors **two Structuring rules** — Incoming Cash and Outgoing Cash. "
-    "Running the backtest on **Structuring (Incoming Cash)** first:\n\n"
-    "The current daily_floor of $3,000 catches all 46 SARs at 15.3% precision. "
-    "Tightening to $5,500 reduces FP by 38% (254 → 157) while retaining 56.5% SAR coverage "
-    "(26 of 46) — viable if the program accepts higher FN.\n\n"
-    "Run **rule_sar_backtest on Structuring (Outgoing Cash)** to see the companion rule's sweep."
+    "The current daily_floor of $3,000 catches all 46 SARs at 15.3% precision; "
+    "tightening to $5,500 reduces FP by 38% (254 → 157) while retaining 56.5% SAR coverage "
+    "(26 of 46) — viable if the program accepts higher FN. "
+    "Run rule_sar_backtest on Structuring (Outgoing Cash) to see the companion rule's sweep."
 )
 
 examples.append({"messages": [
