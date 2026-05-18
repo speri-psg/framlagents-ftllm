@@ -392,6 +392,7 @@ def perform_clustering(df, customer_type=None, n_clusters=4):
         },
         opacity=0.5,
         color_discrete_sequence=px.colors.qualitative.Set1,
+        render_mode="svg",
     )
     fig.update_traces(marker=dict(size=3))
     fig.update_layout(legend=dict(itemsizing='constant'))
