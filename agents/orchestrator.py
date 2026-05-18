@@ -475,8 +475,12 @@ class OrchestratorAgent:
             if name == "segmentation":
                 _cluster_ctx = last_cluster_result or last_assistant
                 if _cluster_ctx and "Cluster" in _cluster_ctx:
+                    # Trim to ~1500 chars to avoid context overflow in long conversations
+                    if len(_cluster_ctx) > 1500:
+                        lines = [l for l in _cluster_ctx.splitlines() if l.strip().startswith("Cluster")]
+                        _cluster_ctx = "\n".join(lines[:20]) if lines else _cluster_ctx[:1500]
                     context = f"[PREVIOUS CLUSTERING RESULT]\n{_cluster_ctx}\n[END PREVIOUS RESULT]"
-                    print("[orchestrator] injecting previous cluster context")
+                    print(f"[orchestrator] injecting previous cluster context ({len(_cluster_ctx)} chars)")
             return agent.run(query, tool_executor, context, history)
 
         results = {}
