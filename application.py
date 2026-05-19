@@ -1961,7 +1961,7 @@ def handle_chat(new_message, pending_prompt, messages):
     agent_text = re.sub(r'===.*?(?:PRE-COMPUTED ANALYSIS|THRESHOLD ANALYSIS).*?===.*?===\s*END (?:PRE-COMPUTED ANALYSIS|THRESHOLD ANALYSIS)\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
     agent_text = re.sub(r'(?:PRE-COMPUTED ANALYSIS|THRESHOLD ANALYSIS)[:\s]*\n?', '', agent_text).strip()
     agent_text = re.sub(r'===.*?(?:PRE-COMPUTED SEGMENT STATS|SEGMENT STATS).*?===.*?===\s*END (?:PRE-COMPUTED SEGMENT STATS|SEGMENT STATS)\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
-    agent_text = re.sub(r'===.*?PRE-COMPUTED CLUSTER STATS.*?===.*?===\s*END PRE-COMPUTED CLUSTER STATS\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
+    agent_text = re.sub(r'===.*?(?:PRE-COMPUTED CLUSTER STATS|CLUSTER STATS).*?===.*?===\s*END (?:PRE-COMPUTED CLUSTER STATS|CLUSTER STATS)\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED CLUSTER RULE SUMMARY.*?===.*?===\s*END CLUSTER RULE SUMMARY\s*===\n?(?:\([^\n]*\)\n?)?', '', agent_text, flags=re.DOTALL).strip()
     agent_text = re.sub(r'===.*?PRE-COMPUTED CLUSTER THRESHOLD ANALYSIS[^\n]*===\n?', '', agent_text).strip()
     agent_text = re.sub(r'\n?===\s*END CLUSTER THRESHOLD ANALYSIS\s*===\n?', '\n\n', agent_text).strip()

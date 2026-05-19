@@ -412,7 +412,7 @@ def perform_clustering(df, customer_type=None, n_clusters=4):
     n_num         = len(numeric_cols)
     n_cat_encoded = len(df_encoded.columns)
     stats_lines = [
-        f"=== PRE-COMPUTED CLUSTER STATS (copy verbatim, do not compute new numbers) ===",
+        f"=== CLUSTER STATS ===",
         f"Segment: {seg_label} | Active accounts: {len(df_active):,} (excluded {len(df_work) - len(df_active):,} with no transactions)",
         f"Clusters: {n_clusters} | Features: {n_num} numeric + {n_cat_encoded} encoded categorical ({len(cat_cols)} original)",
         f"PCA variance explained: PC1={var1:.1f}%, PC2={var2:.1f}%",
@@ -440,7 +440,7 @@ def perform_clustering(df, customer_type=None, n_clusters=4):
                 stats_lines.append(f"- {label}: **{fmt}**")
         stats_lines.append("")  # blank line after each cluster block
 
-    stats_lines.append("=== END PRE-COMPUTED CLUSTER STATS ===")
+    stats_lines.append("=== END CLUSTER STATS ===")
     return fig, "\n".join(stats_lines), df_active
 
 
