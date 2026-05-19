@@ -2142,7 +2142,61 @@ def handle_chat(new_message, pending_prompt, messages):
                     parts = [f"Cluster {c}: {v:,.1f}" for c, v in sorted(parsed.items())]
                     agent_text = f"{target_attr} by cluster: " + ", ".join(parts) + "."
             else:
-                agent_text = (
+                # Generate data-driven per-cluster bullets from the stats block
+                _fb_stats = _raw_stats_this_turn or _cluster_cache.get("stats", "")
+                _fb_bullets = None
+                if _fb_stats:
+                    _fb_clusters: dict = {}
+                    _fb_cur = None
+                    _fb_in_main = True
+                    for _fb_line in _fb_stats.split("\n"):
+                        if "END CLUSTER STATS" in _fb_line:
+                            _fb_in_main = False
+                            _fb_cur = None
+                            continue
+                        _fb_cm = re.search(r'\*\*Cluster (\d+)\*\*', _fb_line)
+                        if _fb_cm and _fb_in_main:
+                            _fb_cur = int(_fb_cm.group(1))
+                            _fb_clusters.setdefault(_fb_cur, {})
+                            continue
+                        if _fb_cur is not None and _fb_in_main:
+                            _fb_m = re.match(r'\s*-\s+(.+?):\s+\*\*(.+?)\*\*', _fb_line)
+                            if _fb_m:
+                                _fb_clusters[_fb_cur][_fb_m.group(1).strip()] = _fb_m.group(2).strip()
+                        _fb_am = re.match(
+                            r'Cluster (\d+): Alerts: ([\d,]+) \| SARs: ([\d,]+) \| FPs: ([\d,]+)', _fb_line
+                        )
+                        if _fb_am:
+                            _cn = int(_fb_am.group(1))
+                            _fb_clusters.setdefault(_cn, {})
+                            _fb_clusters[_cn].update({
+                                '_alerts': _fb_am.group(2),
+                                '_sars':   _fb_am.group(3),
+                                '_fps':    _fb_am.group(4),
+                            })
+                    if _fb_clusters:
+                        _fb_lines = [f"### {ct} Customer Segments\n"]
+                        for _fb_cnum in sorted(_fb_clusters.keys()):
+                            _fb_d = _fb_clusters[_fb_cnum]
+                            _fb_parts = [f"- **Cluster {_fb_cnum}**"]
+                            if _fb_d.get("Customers"):
+                                _fb_parts.append(f"{_fb_d['Customers']} customers")
+                            if _fb_d.get("Avg Weekly Transactions"):
+                                _fb_parts.append(f"{_fb_d['Avg Weekly Transactions']} avg txns/week")
+                            if _fb_d.get("Monthly Txn Volume"):
+                                _fb_parts.append(f"{_fb_d['Monthly Txn Volume']} monthly volume")
+                            if _fb_d.get("Account Age (years)"):
+                                _fb_parts.append(f"{_fb_d['Account Age (years)']} yr account age")
+                            if _fb_d.get("_alerts"):
+                                _fb_parts.append(
+                                    f"{_fb_d['_alerts']} alerts / {_fb_d['_sars']} SARs / {_fb_d['_fps']} FPs"
+                                )
+                            _fb_lines.append(
+                                ": ".join([_fb_parts[0], ", ".join(_fb_parts[1:])]) if len(_fb_parts) > 1
+                                else _fb_parts[0]
+                            )
+                        _fb_bullets = "\n".join(_fb_lines)
+                agent_text = _fb_bullets or (
                     f"Clustering complete for **{ct}** customers. "
                     "Use **Segment Customer Drilldown** and **Cluster Scatter Plot** in the left sidebar to explore."
                 )
