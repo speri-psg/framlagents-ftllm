@@ -421,6 +421,10 @@ class OrchestratorAgent:
         # Build prior session context once — passed to every agent (including policy)
         # so elliptical follow-ups ("and the youngest", "what about days_required?")
         # can be answered correctly even when misrouted.
+        # Cluster context is safe to pass to any agent including policy —
+        # reading ages/counts from a list is unambiguous.
+        # Rule lists are NOT injected to policy — policy lacks sorting logic
+        # and hallucates fake rule IDs when it tries to rank by precision.
         _prior_context = ""
         if last_cluster_result and "Cluster" in last_cluster_result:
             _cc = last_cluster_result
@@ -428,8 +432,6 @@ class OrchestratorAgent:
                 lines = [l for l in _cc.splitlines() if l.strip().startswith("Cluster")]
                 _cc = "\n".join(lines[:20]) if lines else _cc[:1500]
             _prior_context = f"[PREVIOUS CLUSTERING RESULT]\n{_cc}\n[END PREVIOUS RESULT]"
-        elif last_rule_list:
-            _prior_context = f"[PREVIOUS RULE LIST]\n{last_rule_list}\n[END RULE LIST]"
 
         if "greeting" in labels:
             return self._GREETING, []
