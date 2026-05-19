@@ -418,6 +418,19 @@ class OrchestratorAgent:
         """
         labels = self._route(query, last_assistant)
 
+        # Build prior session context once — passed to every agent (including policy)
+        # so elliptical follow-ups ("and the youngest", "what about days_required?")
+        # can be answered correctly even when misrouted.
+        _prior_context = ""
+        if last_cluster_result and "Cluster" in last_cluster_result:
+            _cc = last_cluster_result
+            if len(_cc) > 1500:
+                lines = [l for l in _cc.splitlines() if l.strip().startswith("Cluster")]
+                _cc = "\n".join(lines[:20]) if lines else _cc[:1500]
+            _prior_context = f"[PREVIOUS CLUSTERING RESULT]\n{_cc}\n[END PREVIOUS RESULT]"
+        elif last_rule_list:
+            _prior_context = f"[PREVIOUS RULE LIST]\n{last_rule_list}\n[END RULE LIST]"
+
         if "greeting" in labels:
             return self._GREETING, []
 
@@ -428,7 +441,7 @@ class OrchestratorAgent:
             return self._OUT_OF_SCOPE, []
 
         if "conceptual" in labels:
-            return self.policy_agent.run(query, tool_executor, "", history)
+            return self.policy_agent.run(query, tool_executor, _prior_context, history)
 
         # OFAC screening is handled directly via tool_executor (no specialist agent)
         if "ofac" in labels:
@@ -462,7 +475,7 @@ class OrchestratorAgent:
         agent_labels = [l for l in labels if l in self._agent_map]
 
         if not agent_labels:
-            return self.policy_agent.run(query, tool_executor, "", history)
+            return self.policy_agent.run(query, tool_executor, _prior_context, history)
 
         to_run = [(name, self._agent_map[name]) for name in agent_labels]
 
