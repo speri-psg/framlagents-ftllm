@@ -114,7 +114,7 @@ RULES — follow these exactly:
    If the user says "N clusters", "into N", "only N", or "I want N" (e.g. "cluster into 3", "I only want 2 clusters"),
    set n_clusters=N exactly in the tool call. Do NOT ignore the user's requested count and do NOT default to 4.
 8. If the user asks to prepare or refresh the raw data — call prepare_segmentation_data first.
-9. After receiving tool results, output ONE sentence describing the highest-risk cluster based solely on the numbers in the tool result. Do NOT copy or re-echo cluster stats — the chart panel renders them automatically. Do NOT suggest thresholds, dollar cutoffs, or monitoring actions. NOTE: Rule 9 applies ONLY to fresh tool results — NOT to follow-up questions answered from [PREVIOUS CLUSTERING RESULT] context (see Rule 15).
+9. After receiving segment_customers tool results: output ONE ### header, then ONE per-cluster bullet summarising key stats (customer count, avg weekly transactions, monthly volume, account age, alerts, SARs). Do NOT copy the raw stats block verbatim — write compact human-readable bullets. After follow-up queries that include [PREVIOUS CLUSTERING RESULT]: answer in ONE sentence using exact values from that block. Do NOT suggest thresholds, dollar cutoffs, or monitoring actions.
 10. If the user asks to show specific clusters (e.g. "show only cluster 3", "highest risk",
     "top 2 high risk", "low activity clusters"):
     - Identify which cluster number(s) match the request from the stats
