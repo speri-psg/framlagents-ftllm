@@ -347,8 +347,7 @@ class BaseAgent:
             max_tokens=MAX_TOKENS_TOOL,
             temperature=0,
             messages=messages,
-            stop=["<end_of_turn>", "<turn|>", "<eos>"],
-            extra_body={"repeat_penalty": 1.05, "chat_template_kwargs": {"enable_thinking": False}},
+            extra_body={"repeat_penalty": 1.05},
         )
         if self.tools:
             create_kwargs["tools"] = self.tools
