@@ -204,7 +204,7 @@ SESSIONS = [
     ("Clustering — Individual elliptical follow-up (gap 2 + 6)", [
         "Show me behavioral segments for Individual customers",
         ("which cluster is the oldest",
-         "Cluster 1"),
+         "Cluster 2"),                          # Individual: oldest by customer age (AGE col), not account age
         ("and the youngest",                    # gap 2 on Individual
          "Cluster"),
     ]),
