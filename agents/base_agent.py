@@ -321,7 +321,7 @@ class BaseAgent:
         )
         if self.tools:
             create_kwargs["tools"] = self.tools
-            create_kwargs["tool_choice"] = "auto"
+            create_kwargs["tool_choice"] = "none"
 
         for iteration in range(MAX_TOOL_ITERATIONS):
             if stop_event.is_set():
