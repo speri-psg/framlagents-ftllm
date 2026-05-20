@@ -1023,7 +1023,10 @@ def tool_executor(tool_name, tool_input):
                 )
                 stats_table = make_figures.cluster_stats_table(df_clustered, customer_type)
                 figs = (stats_table, scatter_fig, treemap_fig) if stats_table is not None else (scatter_fig, treemap_fig)
-                stats = _append_alert_stats(stats, df_clustered)
+                _base_stats = stats  # stats from perform_clustering before alert append
+                print(f"[ds_cluster_analysis] {customer_type} base stats: {len(_base_stats)} chars")
+                stats = _append_alert_stats(_base_stats, df_clustered)
+                print(f"[ds_cluster_analysis] {customer_type} full stats: {len(stats)} chars")
                 _last_cluster_raw_stats = stats
                 _cl = df_clustered[["customer_id", "cluster"]].copy()
                 if len(_cl) > 0 and _cl["cluster"].min() == 0:

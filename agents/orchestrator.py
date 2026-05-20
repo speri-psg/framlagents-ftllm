@@ -489,6 +489,10 @@ class OrchestratorAgent:
                 print("[orchestrator] injecting previous rule list for follow-up")
             if name == "segmentation":
                 _cluster_ctx = last_cluster_result or last_assistant
+                # If the stored stats are short (alert counts only, no cluster attributes),
+                # combine with the assistant's previous response which may have more detail.
+                if _cluster_ctx and last_assistant and len(_cluster_ctx) < 500 and len(last_assistant) > len(_cluster_ctx):
+                    _cluster_ctx = _cluster_ctx + "\n\n" + last_assistant
                 if _cluster_ctx and "Cluster" in _cluster_ctx:
                     # Trim to ~1500 chars to avoid context overflow in long conversations
                     if len(_cluster_ctx) > 1500:
