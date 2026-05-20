@@ -13,10 +13,16 @@ stop_event = threading.Event()
 
 
 def _strip_thinking(text: str) -> str:
-    """Strip Gemma 4 'Thinking Process:' chain-of-thought preamble (Ollama only).
-    vLLM thinking is disabled at request level via chat_template_kwargs."""
+    """Strip Gemma 4 chain-of-thought and runaway repetition from outputs."""
     if not text:
         return text
+
+    # Safety net: truncate at 5+ consecutive identical characters (model stuck in loop)
+    m = re.search(r'(.)\1{4,}', text)
+    if m:
+        text = text[:m.start()].strip()
+
+    # Ollama format: "Thinking Process:" prefix with numbered steps
     if not text.startswith("Thinking Process:"):
         return text
     lines = text.splitlines()
