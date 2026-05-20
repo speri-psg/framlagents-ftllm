@@ -17,10 +17,15 @@ def _strip_thinking(text: str) -> str:
     if not text:
         return text
 
-    # Safety net: truncate at 5+ consecutive identical characters (model stuck in loop)
-    m = re.search(r'(.)\1{4,}', text)
+    # Safety net: truncate at phrase-level repetition (substring of 15+ chars repeating 3+ times)
+    m = re.search(r'(.{15,}?)\1{2,}', text, re.DOTALL)
     if m:
-        text = text[:m.start()].strip()
+        text = text[:m.start() + len(m.group(1))].strip()
+    else:
+        # Character-level repetition fallback (e.g. >>>>>)
+        m = re.search(r'(.)\1{4,}', text)
+        if m:
+            text = text[:m.start()].strip()
 
     # Ollama format: "Thinking Process:" prefix with numbered steps
     if not text.startswith("Thinking Process:"):
@@ -347,7 +352,7 @@ class BaseAgent:
             max_tokens=MAX_TOKENS_TOOL,
             temperature=0,
             messages=messages,
-            extra_body={"repeat_penalty": 1.05},
+            extra_body={},
         )
         if self.tools:
             create_kwargs["tools"] = self.tools
