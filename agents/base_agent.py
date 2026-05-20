@@ -13,18 +13,38 @@ stop_event = threading.Event()
 
 
 def _strip_thinking(text: str) -> str:
-    """Strip Gemma 4 'Thinking Process:' chain-of-thought preamble."""
-    if not text.startswith("Thinking Process:"):
+    """Strip Gemma 4 chain-of-thought leaks from both Ollama and vLLM outputs."""
+    if not text:
         return text
-    lines = text.splitlines()
-    last_num_idx = -1
-    for i, line in enumerate(lines):
-        if re.match(r"^\d+\.", line.strip()):
-            last_num_idx = i
-    if last_num_idx == -1:
-        return "\n".join(lines[1:]).strip()
-    answer = "\n".join(lines[last_num_idx + 1:]).strip()
-    return answer if answer else text
+
+    # vLLM Gemma4: <think>...</think> blocks
+    if '<think>' in text:
+        text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+
+    # vLLM Gemma4: inline "thought " suffix — answer followed immediately by thinking
+    # e.g. "Cluster 3 is the youngest.thought The user is asking..."
+    m = re.search(r'[.!?]\s*thought\s+[A-Z]', text)
+    if m:
+        text = text[:m.start() + 1].strip()
+
+    # Garbage: 5+ consecutive identical characters (model stuck in repetition loop)
+    m = re.search(r'(.)\1{4,}', text)
+    if m:
+        text = text[:m.start()].strip()
+
+    # Ollama format: "Thinking Process:" prefix with numbered steps
+    if text.startswith("Thinking Process:"):
+        lines = text.splitlines()
+        last_num_idx = -1
+        for i, line in enumerate(lines):
+            if re.match(r"^\d+\.", line.strip()):
+                last_num_idx = i
+        if last_num_idx == -1:
+            return "\n".join(lines[1:]).strip()
+        answer = "\n".join(lines[last_num_idx + 1:]).strip()
+        return answer if answer else text
+
+    return text
 
 # Sentinel raised by _stream_llm when stop_event fires mid-stream
 class _Stopped(Exception):
@@ -338,6 +358,7 @@ class BaseAgent:
             max_tokens=MAX_TOKENS_TOOL,
             temperature=0,
             messages=messages,
+            stop=["<end_of_turn>", "<turn|>", "<eos>"],
             extra_body={"repeat_penalty": 1.05},
         )
         if self.tools:
