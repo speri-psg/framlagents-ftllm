@@ -393,8 +393,20 @@ class BaseAgent:
                     name, args = parsed
                     fake_id = f"fallback_{iteration}"
                     structured_calls.append((name, args, fake_id))
-                    # Use a simplified message format compatible with all models
-                    messages.append({"role": "assistant", "content": msg.content})
+                    # Structure with tool_calls so the subsequent tool message is valid OpenAI
+                    # format for both Ollama and vLLM (orphaned tool messages skip in vLLM template)
+                    messages.append({
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [{
+                            "id": fake_id,
+                            "type": "function",
+                            "function": {
+                                "name": name,
+                                "arguments": json.dumps(args),
+                            },
+                        }],
+                    })
 
             # ── Execute tool calls ────────────────────────────────────────────
             if structured_calls:
