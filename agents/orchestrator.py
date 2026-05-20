@@ -485,8 +485,9 @@ class OrchestratorAgent:
             name, agent = to_run[0]
             context = ""
             if name == "threshold" and last_rule_list:
-                context = f"[PREVIOUS RULE LIST]\n{last_rule_list}\n[END RULE LIST]"
-                print("[orchestrator] injecting previous rule list for follow-up")
+                _rule_ctx = last_rule_list[:2000] if len(last_rule_list) > 2000 else last_rule_list
+                context = f"[PREVIOUS RULE LIST]\n{_rule_ctx}\n[END RULE LIST]"
+                print(f"[orchestrator] injecting previous rule list for follow-up ({len(_rule_ctx)} chars)")
             if name == "segmentation":
                 _cluster_ctx = last_cluster_result or last_assistant
                 # If the stored stats are short (alert counts only, no cluster attributes),
