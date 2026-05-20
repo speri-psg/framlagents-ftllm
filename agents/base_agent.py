@@ -146,6 +146,27 @@ def _parse_tool_call_from_content(content: str) -> tuple | None:
         except json.JSONDecodeError:
             pass
 
+    # Format 1b: vLLM Gemma4 compact — call:name{key:val,key:val} (no newline, no JSON quotes)
+    m = re.search(r'\bcall:(\w+)\{([^}]*)\}', content)
+    if m:
+        raw_name = m.group(1)
+        name = _normalize_tool_name(raw_name)
+        args = {}
+        for pair in m.group(2).split(','):
+            pair = pair.strip()
+            if ':' in pair:
+                k, v = pair.split(':', 1)
+                k, v = k.strip(), v.strip()
+                try:
+                    args[k] = int(v)
+                except ValueError:
+                    try:
+                        args[k] = float(v)
+                    except ValueError:
+                        args[k] = v
+        print(f"[base_agent] fallback parse (compact call format): {raw_name} → {name}, args={args}")
+        return name, _normalize_args(name, args)
+
     # Format 2: Qwen style — <tool_call>{"name": ..., "arguments": ...}</tool_call>
     m = re.search(r'<tool_call>\s*(\{.*?\})\s*</tool_call>', content, re.DOTALL)
     if m:
