@@ -494,8 +494,8 @@ class OrchestratorAgent:
                 if _cluster_ctx and last_assistant and len(_cluster_ctx) < 500 and len(last_assistant) > len(_cluster_ctx):
                     _cluster_ctx = _cluster_ctx + "\n\n" + last_assistant
                 if _cluster_ctx and "Cluster" in _cluster_ctx:
-                    # Trim to ~1500 chars to avoid context overflow in long conversations
-                    if len(_cluster_ctx) > 1500:
+                    # Trim to ~2500 chars to avoid context overflow in long conversations
+                    if len(_cluster_ctx) > 2500:
                         lines = [l for l in _cluster_ctx.splitlines() if l.strip().startswith("Cluster")]
                         _cluster_ctx = "\n".join(lines[:20]) if lines else _cluster_ctx[:1500]
                     context = f"[PREVIOUS CLUSTERING RESULT]\n{_cluster_ctx}\n[END PREVIOUS RESULT]"
